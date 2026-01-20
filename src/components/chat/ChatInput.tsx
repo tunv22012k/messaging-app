@@ -141,7 +141,7 @@ export default function ChatInput({ onSendMessage, onSendMedia, onTyping, disabl
             {showEmojiPicker && (
                 <div
                     ref={pickerRef}
-                    className="absolute bottom-full left-0 mb-2 z-50 shadow-xl rounded-lg"
+                    className="absolute bottom-full right-15 mb-2 z-50 shadow-xl rounded-lg"
                 >
                     <EmojiPicker
                         onEmojiClick={handleEmojiClick}
