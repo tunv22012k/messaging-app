@@ -122,7 +122,7 @@ export default function MessageBubble({
     };
 
     return (
-        <div className={clsx("flex mb-8 group relative", isOwn ? "justify-end" : "justify-start", showAvatar ? "mt-2" : "")}>
+        <div className={clsx("flex mb-6 group relative", isOwn ? "justify-end" : "justify-start", showAvatar ? "mt-2" : "")}>
             {!isOwn && <Avatar />}
 
             <div className="relative max-w-[70%]">
