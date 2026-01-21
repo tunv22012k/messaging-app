@@ -22,9 +22,15 @@ export default function Sidebar() {
     const [searchQuery, setSearchQuery] = useState("");
 
     const filteredUsers = users.filter(u => {
+        if (!user) return false;
         const matchesSearch = u.displayName?.toLowerCase().includes(searchQuery.toLowerCase());
-        const isConnected = user?.connections?.includes(u.uid);
-        return matchesSearch && isConnected;
+        const isConnected = user.connections?.includes(u.uid);
+
+        // Also show if we have an active chat history
+        const chatId = [user.uid, u.uid].sort().join("_");
+        const hasChat = !!chatsMap[chatId];
+
+        return matchesSearch && (isConnected || hasChat);
     });
 
     // 1. Fetch Users

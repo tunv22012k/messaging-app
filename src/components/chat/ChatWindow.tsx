@@ -461,7 +461,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
     return (
         <div className="flex h-full flex-col bg-gray-50">
             <div className="border-b bg-white p-4 shadow-sm flex items-center gap-3">
-                <Link href="/" className="md:hidden p-2 -ml-2 text-gray-600 hover:text-gray-900">
+                <Link href="/chat" className="md:hidden p-2 -ml-2 text-gray-600 hover:text-gray-900">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                     </svg>
