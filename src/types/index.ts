@@ -5,6 +5,7 @@ export interface User {
     photoURL: string | null;
     createdAt: number; // timestamp
     lastSeen?: number; // timestamp
+    connections?: string[]; // Array of connected user UIDs
 }
 
 export interface Chat {

@@ -9,7 +9,7 @@ import {
     signInWithPopup,
     signOut
 } from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { User } from "@/types";
 
@@ -38,48 +38,61 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const syncUserToFirestore = async (fUser: FirebaseUser) => {
-        const userRef = doc(db, "users", fUser.uid);
-        const userSnap = await getDoc(userRef);
-
-        if (!userSnap.exists()) {
-            const newUser: User = {
-                uid: fUser.uid,
-                displayName: fUser.displayName,
-                email: fUser.email,
-                photoURL: fUser.photoURL,
-                createdAt: Date.now(),
-                lastSeen: Date.now(),
-            };
-            await setDoc(userRef, newUser);
-            setUser(newUser);
-        } else {
-            setUser(userSnap.data() as User);
-            // Optionally update lastSeen here or in presence logic
-        }
-    };
-
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (fUser) => {
-            try {
-                setFirebaseUser(fUser);
-                if (fUser) {
-                    console.log("AuthContext: User authenticated, syncing to Firestore...", fUser.uid);
-                    await syncUserToFirestore(fUser);
-                    console.log("AuthContext: User synced successfully");
-                } else {
-                    console.log("AuthContext: No user authenticated");
-                    setUser(null);
-                }
-            } catch (error) {
-                console.error("AuthContext: Error during auth state change", error);
-            } finally {
+        const unsubscribe = onAuthStateChanged(auth, (fUser) => {
+            setFirebaseUser(fUser);
+            if (!fUser) {
+                setUser(null);
                 setLoading(false);
             }
+            // If fUser exists, the second useEffect will handle fetching/listening
         });
-
         return () => unsubscribe();
     }, []);
+
+    useEffect(() => {
+        let unsubscribeSnapshot: () => void;
+
+        const setupUserListener = async () => {
+            if (!firebaseUser) return;
+
+            try {
+                const userRef = doc(db, "users", firebaseUser.uid);
+                const userSnap = await getDoc(userRef);
+
+                if (!userSnap.exists()) {
+                    const newUser: User = {
+                        uid: firebaseUser.uid,
+                        displayName: firebaseUser.displayName,
+                        email: firebaseUser.email,
+                        photoURL: firebaseUser.photoURL,
+                        createdAt: Date.now(),
+                        lastSeen: Date.now(),
+                        connections: [],
+                    };
+                    await setDoc(userRef, newUser);
+                }
+
+                // Listen for real-time updates
+                // Listen for real-time updates
+                unsubscribeSnapshot = onSnapshot(userRef, (userDoc) => {
+                    if (userDoc.exists()) {
+                        setUser(userDoc.data() as User);
+                    }
+                    setLoading(false);
+                });
+            } catch (error) {
+                console.error("Error setting up user listener", error);
+                setLoading(false);
+            }
+        };
+
+        setupUserListener();
+
+        return () => {
+            if (unsubscribeSnapshot) unsubscribeSnapshot();
+        };
+    }, [firebaseUser]);
 
     const signInWithGoogle = async () => {
         const provider = new GoogleAuthProvider();

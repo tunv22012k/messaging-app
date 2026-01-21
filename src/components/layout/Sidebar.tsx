@@ -7,7 +7,7 @@ import { ref, onValue } from "firebase/database";
 import { User } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
 import LastSeen from "../ui/LastSeen";
 
 export default function Sidebar() {
@@ -17,7 +17,15 @@ export default function Sidebar() {
     const [chatsMap, setChatsMap] = useState<Record<string, any>>({});
     const router = useRouter();
     const params = useParams();
+    const pathname = usePathname();
     const activeChatId = params?.chatId as string;
+    const [searchQuery, setSearchQuery] = useState("");
+
+    const filteredUsers = users.filter(u => {
+        const matchesSearch = u.displayName?.toLowerCase().includes(searchQuery.toLowerCase());
+        const isConnected = user?.connections?.includes(u.uid);
+        return matchesSearch && isConnected;
+    });
 
     // 1. Fetch Users
     useEffect(() => {
@@ -30,8 +38,9 @@ export default function Sidebar() {
             });
             setUsers(usersList);
         });
+
         return () => unsubscribe();
-    }, [user]);
+    }, [user?.uid]);
 
     // 2. Fetch Presence
     useEffect(() => {
@@ -54,7 +63,7 @@ export default function Sidebar() {
             setChatsMap(map);
         });
         return () => unsubscribe();
-    }, [user]);
+    }, [user?.uid]);
 
     const createChat = (targetUser: User) => {
         if (!user) return;
@@ -65,24 +74,30 @@ export default function Sidebar() {
     const getStatusIndicator = (uid: string) => {
         const userStatus = presence[uid];
         if (userStatus?.state === "online") {
-            return <div className="h-3 w-3 rounded-full bg-green-500 ring-2 ring-white"></div>;
+            return (
+                <div className="absolute bottom-0 right-0 shadow-sm rounded-full bg-white p-[1.5px]">
+                    <div className="h-3 w-3 rounded-full bg-green-500 ring-2 ring-white"></div>
+                </div>
+            );
         }
 
         // Show offline time if available
         if (userStatus?.last_changed) {
             return (
-                <LastSeen
-                    date={userStatus.last_changed}
-                    format="short"
-                    className="text-[10px] font-bold text-gray-500 bg-white px-1 rounded-sm shadow-sm ring-1 ring-gray-200"
-                />
+                <div className="absolute bottom-0 right-0 transform translate-y-1">
+                    <LastSeen
+                        date={userStatus.last_changed}
+                        format="short"
+                        className="text-[10px] font-bold text-gray-500 bg-white px-1 rounded-sm shadow-sm ring-1 ring-gray-200"
+                    />
+                </div>
             );
         }
 
-        return <div className="h-3 w-3 rounded-full bg-gray-300 ring-2 ring-white"></div>;
+        return null;
     };
 
-    const getLastMessageText = (targetUid: string) => {
+    const getLastMessageText = (targetUid: string, isActive: boolean) => {
         if (!user) return "";
         const chatId = [user.uid, targetUid].sort().join("_");
         const chat = chatsMap[chatId];
@@ -93,88 +108,118 @@ export default function Sidebar() {
 
             // Check if unread (not sent by me, and readBy doesn't include me)
             const isUnread = !isMe && (!chat.lastMessage.readBy || !chat.lastMessage.readBy.includes(user.uid));
-            const baseStyle = isUnread ? "font-bold text-gray-900" : "text-gray-500";
-            const textStyle = isUnread ? "font-bold text-gray-900" : "text-gray-600";
+
+            // Text Color Logic
+            let textColorClass = "text-gray-600";
+            if (isActive) {
+                textColorClass = "text-white/90";
+            } else if (isUnread) {
+                textColorClass = "font-bold text-gray-900";
+            } else {
+                textColorClass = "text-gray-500";
+            }
+
+            // Base style for media (usually slightly different but let's sync)
+            const mediaClass = isActive ? "text-white/90" : (isUnread ? "font-bold text-gray-900" : "text-gray-500");
 
             // Handle media types
-            if (chat.lastMessage.type === 'image') return <span className={baseStyle}>{prefix}Sent an image</span>;
-            if (chat.lastMessage.type === 'video') return <span className={baseStyle}>{prefix}Sent a video</span>;
-            return <span className={textStyle}>{prefix}{chat.lastMessage.text}</span>;
+            if (chat.lastMessage.type === 'image') return <span className={mediaClass}>{prefix}Sent an image</span>;
+            if (chat.lastMessage.type === 'video') return <span className={mediaClass}>{prefix}Sent a video</span>;
+            return <span className={textColorClass}>{prefix}{chat.lastMessage.text}</span>;
         }
 
-        return <span className="text-gray-400 italic">No messages yet</span>;
+        return <span className={isActive ? "text-white/70 italic" : "text-gray-400 italic"}>No messages yet</span>;
     };
 
     return (
         <div className="flex h-screen w-full md:w-80 flex-col border-r border-gray-200 bg-white">
-            <div className="border-b bg-gray-50 p-4 pb-2 flex justify-between items-center">
-                <div>
-                    <h2 className="text-xl font-semibold text-gray-800">Chats</h2>
-                    <div className="text-sm text-gray-600">
-                        Hello, {user?.displayName || "User"}
-                    </div>
+            <div className="flex flex-col gap-4 p-4 pb-2 border-b border-gray-100">
+                <div className="flex items-center justify-between">
+                    <h2 className="text-2xl font-bold tracking-tight text-gray-900">
+                        Messages
+                        <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-600">
+                            {users.length}
+                        </span>
+                    </h2>
                 </div>
-                <Link href="/profile" className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-all" title="Edit Profile">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                </Link>
+
+                {/* Search Bar */}
+                <div className="relative">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                        <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Search conversations..."
+                        className="block w-full rounded-2xl border-0 bg-gray-100 py-2.5 pl-10 pr-4 text-sm text-gray-900 ring-0 transition-all placeholder:text-gray-500 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4">
-                <h3 className="mb-2 text-xs font-semibold uppercase text-gray-400">Contacts</h3>
-                <div className="space-y-2">
-                    {users.map((u) => {
-                        const chatId = [user?.uid, u.uid].sort().join("_");
-                        const isActive = activeChatId === chatId;
-                        return (
-                            <button
-                                key={u.uid}
-                                onClick={() => createChat(u)}
-                                className={`flex w-full items-center gap-3 rounded-lg p-3 text-left transition-colors cursor-pointer ${isActive ? "bg-gray-100" : "hover:bg-gray-100"
-                                    }`}
-                            >
-                                <div className="relative">
-                                    <img
-                                        src={u.photoURL || `https://ui-avatars.com/api/?name=${u.displayName}`}
-                                        alt={u.displayName || "User"}
-                                        className="h-10 w-10 rounded-full object-cover"
-                                    />
-                                    <div className="absolute bottom-0 right-0 transform translate-x-1 translate-y-1">
+            <div className="flex-1 overflow-y-auto px-3 py-2 custom-scrollbar">
+                {filteredUsers.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-center opacity-50">
+                        <p className="text-sm">No contacts found</p>
+                    </div>
+                ) : (
+                    <div className="space-y-1">
+                        {filteredUsers.map((u) => {
+                            const chatId = [user?.uid, u.uid].sort().join("_");
+                            const isActive = activeChatId === chatId;
+                            // Check if last message is unread to highlight
+                            const chat = chatsMap[chatId];
+                            const lastMsg = chat?.lastMessage;
+                            const isUnread = lastMsg && lastMsg.senderId !== user?.uid && (!lastMsg.readBy || !lastMsg.readBy.includes(user?.uid));
+
+                            return (
+                                <button
+                                    key={u.uid}
+                                    onClick={() => createChat(u)}
+                                    className={`group relative flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-all duration-200 
+                                        ${isActive
+                                            ? "bg-blue-500 shadow-md shadow-blue-500/20"
+                                            : "hover:bg-gray-100"
+                                        }`}
+                                >
+                                    <div className="relative flex-none">
+                                        <div className={`rounded-full p-0.5 ${isActive ? 'bg-white/20' : 'bg-transparent'}`}>
+                                            <img
+                                                src={u.photoURL || `https://ui-avatars.com/api/?name=${u.displayName}`}
+                                                alt={u.displayName || "User"}
+                                                className="h-12 w-12 rounded-full object-cover bg-gray-200"
+                                            />
+                                        </div>
                                         {getStatusIndicator(u.uid)}
                                     </div>
-                                </div>
-                                <div className="flex-1 overflow-hidden">
-                                    <p className="truncate font-medium text-gray-900">{u.displayName}</p>
-                                    <p className="truncate text-xs">{getLastMessageText(u.uid)}</p>
-                                </div>
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
-            <div className="border-t bg-gray-50 p-4 pt-[26px]">
-                <div className="flex items-center gap-3">
-                    <img
-                        src={user?.photoURL || `https://ui-avatars.com/api/?name=${user?.displayName || "User"}`}
-                        alt="My Profile"
-                        className="h-10 w-10 rounded-full object-cover"
-                    />
-                    <div className="flex-1 overflow-hidden">
-                        <p className="truncate font-medium text-gray-900">{user?.displayName || "User"}</p>
-                        <p className="truncate text-xs text-gray-500">{user?.email}</p>
+
+                                    <div className="flex-1 min-w-0 overflow-hidden">
+                                        <div className="flex justify-between items-baseline mb-0.5">
+                                            <p className={`truncate text-sm font-semibold ${isActive ? "text-white" : "text-gray-900"}`}>
+                                                {u.displayName}
+                                            </p>
+                                        </div>
+                                        <p className={`truncate text-xs ${isActive
+                                            ? "text-white/90"
+                                            : isUnread
+                                                ? "font-bold text-gray-900"
+                                                : "text-gray-500 group-hover:text-gray-600"
+                                            }`}>
+                                            {getLastMessageText(u.uid, isActive)}
+                                        </p>
+                                    </div>
+
+                                    {isUnread && !isActive && (
+                                        <div className="h-2.5 w-2.5 flex-none rounded-full bg-blue-600 ring-4 ring-white"></div>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
-                    <button
-                        onClick={logout}
-                        className="rounded-full p-2 text-gray-500 hover:bg-gray-200 hover:text-red-600"
-                        title="Logout"
-                    >
-                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 01-3-3h4a3 3 0 01 3 3v1" />
-                        </svg>
-                    </button>
-                </div>
+                )}
             </div>
         </div>
     );

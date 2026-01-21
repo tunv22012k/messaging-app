@@ -97,7 +97,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
             });
             return () => unsub();
         }
-    }, [chatId, user]);
+    }, [chatId, user?.uid]);
 
     const [messageLimit, setMessageLimit] = useState(20);
     const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -170,7 +170,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
             unsubTyping();
             remove(ref(rtdb, `typing/${chatId}/${user.uid}`));
         };
-    }, [chatId, user]); // Removed messageLimit dependency
+    }, [chatId, user?.uid]); // Removed messageLimit dependency
 
     // Messages Listener (Run when limit changes)
     useEffect(() => {
@@ -199,7 +199,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
         return () => {
             unsubMessages();
         };
-    }, [chatId, user, messageLimit]);
+    }, [chatId, user?.uid, messageLimit]);
 
     // Update the scroll handler
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -361,7 +361,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
         };
 
         markAsRead();
-    }, [messages, user, chatId, chatData]);
+    }, [messages, user?.uid, chatId, chatData]);
 
     const sendMessage = async (text: string) => {
         if (!user || !chatId) return;

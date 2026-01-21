@@ -7,8 +7,8 @@ import PresenceManager from "@/components/PresenceManager";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Real-time Chat App",
-  description: "Built with Next.js and Firebase",
+  title: "Booking Sport",
+  description: "Booking Sport application",
 };
 
 export default function RootLayout({

@@ -57,7 +57,7 @@ export function usePresence() {
             // On unmount/logout, set offline immediately
             set(userStatusDatabaseRef, isOfflineForDatabase);
         };
-    }, [user]);
+    }, [user?.uid]);
 
     return isOnline;
 }
