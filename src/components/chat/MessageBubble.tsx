@@ -9,16 +9,19 @@ export default function MessageBubble({
     onImageClick,
     showAvatar,
     avatarUrl,
-    onReaction
+    onReaction,
+    isMe: propsIsMe
 }: {
     message: Message;
     onImageClick?: (url: string) => void;
     showAvatar?: boolean;
     avatarUrl?: string;
     onReaction?: (messageId: string, emoji: string) => void;
+    isMe?: boolean;
 }) {
     const { user } = useAuth();
-    const isOwn = message.senderId === user?.uid;
+    // Use passed isMe prop if available, otherwise fall back to internal check (though internal check is flaky for mixed IDs)
+    const isOwn = propsIsMe !== undefined ? propsIsMe : String(message.senderId) === String(user?.uid);
     const [showPicker, setShowPicker] = useState(false);
     const pickerRef = useRef<HTMLDivElement>(null);
 
@@ -79,20 +82,7 @@ export default function MessageBubble({
         }
     };
 
-    const Avatar = () => (
-        <div className={clsx("flex-shrink-0 w-8 h-8", isOwn ? "ml-2" : "mr-2")}>
-            {showAvatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                    src={avatarUrl || `https://ui-avatars.com/api/?name=${isOwn ? 'Me' : 'User'}`}
-                    alt="Avatar"
-                    className="w-8 h-8 rounded-full object-cover"
-                />
-            ) : (
-                <div className="w-8 h-8" /> // Spacer to keep alignment
-            )}
-        </div>
-    );
+
 
     const renderReactions = () => {
         if (!message.reactions || Object.keys(message.reactions).length === 0) return null;
@@ -121,11 +111,30 @@ export default function MessageBubble({
         );
     };
 
+    const Avatar = () => (
+        <div className="flex-shrink-0 w-8 h-8 mr-2 mt-1">
+            {showAvatar && (
+                avatarUrl ? (
+                    <img
+                        src={avatarUrl}
+                        alt="Avatar"
+                        className="w-8 h-8 rounded-full object-cover border border-gray-100"
+                    />
+                ) : (
+                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xs ring-2 ring-white">
+                        {message.sender?.displayName?.charAt(0).toUpperCase() || "?"}
+                    </div>
+                )
+            )}
+            {!showAvatar && <div className="w-8 mr-2" />}
+        </div>
+    );
+
     return (
-        <div className={clsx("flex mb-6 group relative", isOwn ? "justify-end" : "justify-start", showAvatar ? "mt-2" : "")}>
+        <div className={clsx("flex group relative", isOwn ? "justify-end" : "justify-start", showAvatar ? "mt-2" : "")}>
             {!isOwn && <Avatar />}
 
-            <div className="relative max-w-[70%]">
+            <div className="relative">
                 {/* Reaction Picker Popover */}
                 {showPicker && (
                     <div
@@ -194,7 +203,7 @@ export default function MessageBubble({
                 {renderReactions()}
             </div>
 
-            {isOwn && <Avatar />}
+
         </div>
     );
 }

@@ -95,7 +95,7 @@ export default function Header() {
                                 {user.displayName}
                             </span>
                             <img
-                                src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`}
+                                src={user.avatar || `https://ui-avatars.com/api/?name=${user.displayName}`}
                                 alt={user.displayName || "User"}
                                 className="h-9 w-9 rounded-full object-cover border border-gray-200"
                             />

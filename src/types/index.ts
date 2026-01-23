@@ -2,10 +2,15 @@ export interface User {
     uid: string;
     displayName: string | null;
     email: string | null;
-    photoURL: string | null;
+    avatar: string | null;
     createdAt: number; // timestamp
     lastSeen?: number; // timestamp
     connections?: string[]; // Array of connected user UIDs
+    lastMessage?: string;
+    lastMessageSenderId?: string;
+    lastMessageReadAt?: string | null;
+    google_id?: string;
+    id?: number;
 }
 
 export interface Chat {
@@ -15,7 +20,7 @@ export interface Chat {
     participants: {
         [uid: string]: {
             displayName: string | null;
-            photoURL: string | null;
+            avatar: string | null;
         };
     };
     lastMessage?: {
@@ -41,7 +46,9 @@ export interface Message {
         mimeType: string;
     };
     readBy?: string[];
+    readAt?: string | null;
     reactions?: { [emoji: string]: string[] }; // emoji -> array of userIds
+    sender?: User; // Add sender relationship for detailed info
 }
 
 export interface PresenceStatus {

@@ -1,129 +1,117 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import {
-    User as FirebaseUser,
-    onAuthStateChanged,
-    GoogleAuthProvider,
-    FacebookAuthProvider,
-    signInWithPopup,
-    signOut
-} from "firebase/auth";
-import { doc, setDoc, getDoc, onSnapshot } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
 import { User } from "@/types";
 
 interface AuthContextType {
     user: User | null;
-    firebaseUser: FirebaseUser | null;
     loading: boolean;
-    signInWithGoogle: () => Promise<void>;
-    signInWithFacebook: () => Promise<void>;
+    signInWithGoogle: () => void;
+    signInWithFacebook: () => void;
     logout: () => Promise<void>;
+    loginWithToken: (token: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
     user: null,
-    firebaseUser: null,
     loading: true,
-    signInWithGoogle: async () => { },
-    signInWithFacebook: async () => { },
+    signInWithGoogle: () => { },
+    signInWithFacebook: () => { },
     logout: async () => { },
+    loginWithToken: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [user, setUser] = useState<User | null>(null);
-    const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (fUser) => {
-            setFirebaseUser(fUser);
-            if (!fUser) {
-                setUser(null);
-                setLoading(false);
-            }
-            // If fUser exists, the second useEffect will handle fetching/listening
-        });
-        return () => unsubscribe();
-    }, []);
-
-    useEffect(() => {
-        let unsubscribeSnapshot: () => void;
-
-        const setupUserListener = async () => {
-            if (!firebaseUser) return;
-
-            try {
-                const userRef = doc(db, "users", firebaseUser.uid);
-                const userSnap = await getDoc(userRef);
-
-                if (!userSnap.exists()) {
-                    const newUser: User = {
-                        uid: firebaseUser.uid,
-                        displayName: firebaseUser.displayName,
-                        email: firebaseUser.email,
-                        photoURL: firebaseUser.photoURL,
-                        createdAt: Date.now(),
-                        lastSeen: Date.now(),
-                        connections: [],
-                    };
-                    await setDoc(userRef, newUser);
-                }
-
-                // Listen for real-time updates
-                // Listen for real-time updates
-                unsubscribeSnapshot = onSnapshot(userRef, (userDoc) => {
-                    if (userDoc.exists()) {
-                        setUser(userDoc.data() as User);
-                    }
-                    setLoading(false);
-                });
-            } catch (error) {
-                console.error("Error setting up user listener", error);
-                setLoading(false);
-            }
+    // Function to map Backend User to Frontend User Interface
+    const mapBackendUser = (backendUser: any): User => {
+        return {
+            uid: backendUser.google_id || String(backendUser.id),
+            displayName: backendUser.name,
+            email: backendUser.email,
+            avatar: backendUser.avatar,
+            createdAt: new Date(backendUser.created_at).getTime(),
+            lastSeen: new Date(backendUser.updated_at).getTime(),
+            connections: [],
+            google_id: backendUser.google_id,
+            id: backendUser.id,
         };
+    };
 
-        setupUserListener();
-
-        return () => {
-            if (unsubscribeSnapshot) unsubscribeSnapshot();
-        };
-    }, [firebaseUser]);
-
-    const signInWithGoogle = async () => {
-        const provider = new GoogleAuthProvider();
+    const fetchUser = async (token: string) => {
         try {
-            await signInWithPopup(auth, provider);
+            const response = await fetch('http://localhost:8000/api/user', {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/json',
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setUser(mapBackendUser(data));
+            } else {
+                localStorage.removeItem('auth_token');
+                setUser(null);
+            }
         } catch (error) {
-            console.error("Error signing in with Google", error);
-            throw error;
+            console.error("Failed to fetch user:", error);
+            localStorage.removeItem('auth_token');
+            setUser(null);
+        } finally {
+            setLoading(false);
         }
     };
 
-    const signInWithFacebook = async () => {
-        const provider = new FacebookAuthProvider();
-        try {
-            await signInWithPopup(auth, provider);
-        } catch (error) {
-            console.error("Error signing in with Facebook", error);
-            throw error;
+    useEffect(() => {
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+            fetchUser(token);
+        } else {
+            setLoading(false);
         }
+    }, []);
+
+    const signInWithGoogle = () => {
+        // Redirect to Backend Socialite Endpoint
+        window.location.href = 'http://localhost:8000/api/auth/google/redirect';
+    };
+
+    const signInWithFacebook = () => {
+        console.warn("Facebook login not yet implemented");
+        // window.location.href = 'http://localhost:8000/api/auth/facebook/redirect';
+    };
+
+    const loginWithToken = async (token: string) => {
+        localStorage.setItem('auth_token', token);
+        await fetchUser(token);
     };
 
     const logout = async () => {
-        try {
-            await signOut(auth);
-        } catch (error) {
-            console.error("Error signing out", error);
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+            try {
+                await fetch('http://localhost:8000/api/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Accept': 'application/json',
+                    }
+                });
+            } catch (error) {
+                console.error("Logout failed", error);
+            }
         }
+        localStorage.removeItem('auth_token');
+        setUser(null);
     };
 
     return (
-        <AuthContext.Provider value={{ user, firebaseUser, loading, signInWithGoogle, signInWithFacebook, logout }}>
+        <AuthContext.Provider value={{ user, loading, signInWithGoogle, signInWithFacebook, logout, loginWithToken }}>
             {children}
         </AuthContext.Provider>
     );

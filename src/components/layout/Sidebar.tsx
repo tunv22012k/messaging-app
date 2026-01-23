@@ -1,140 +1,301 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { db, rtdb } from "@/lib/firebase";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { ref, onValue } from "firebase/database";
+import { useEffect, useState, useRef } from "react";
 import { User } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
 import { useRouter, useParams, usePathname } from "next/navigation";
 import LastSeen from "../ui/LastSeen";
+import { usePresence } from "@/hooks/usePresence";
+
+import echo from "@/lib/echo";
+import { formatDistanceToNow } from 'date-fns';
+import { vi } from 'date-fns/locale';
 
 export default function Sidebar() {
     const { user, logout } = useAuth();
     const [users, setUsers] = useState<User[]>([]);
-    const [presence, setPresence] = useState<Record<string, any>>({});
-    const [chatsMap, setChatsMap] = useState<Record<string, any>>({});
     const router = useRouter();
     const params = useParams();
-    const pathname = usePathname();
+    const { onlineUsers, isUserOnline } = usePresence();
     const activeChatId = params?.chatId as string;
+    // Use ref to track activeChatId inside event listeners
+    const activeChatIdRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        activeChatIdRef.current = activeChatId;
+    }, [activeChatId]);
+
     const [searchQuery, setSearchQuery] = useState("");
 
     const filteredUsers = users.filter(u => {
         if (!user) return false;
         const matchesSearch = u.displayName?.toLowerCase().includes(searchQuery.toLowerCase());
-        const isConnected = user.connections?.includes(u.uid);
-
-        // Also show if we have an active chat history
-        const chatId = [user.uid, u.uid].sort().join("_");
-        const hasChat = !!chatsMap[chatId];
-
-        return matchesSearch && (isConnected || hasChat);
+        // Show all users for now as we don't have connections implemented in backend fully
+        return matchesSearch;
     });
+
+    console.log("[Sidebar] Render - Users:", users.map(u => ({ uid: u.uid, lastMessage: u.lastMessage })));
 
     // 1. Fetch Users
     useEffect(() => {
         if (!user) return;
-        const q = query(collection(db, "users"), where("uid", "!=", user.uid));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const usersList: User[] = [];
-            snapshot.forEach((doc) => {
-                usersList.push(doc.data() as User);
-            });
-            setUsers(usersList);
-        });
+        const token = localStorage.getItem('auth_token');
 
-        return () => unsubscribe();
-    }, [user?.uid]);
+        fetch('http://localhost:8000/api/chats', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
+            .then(res => res.json())
+            .then(data => {
+                const mappedUsers = data.map((u: any) => ({
+                    uid: u.google_id || String(u.id),
+                    id: u.id, // Store original numeric ID for fallback matching
+                    displayName: u.name,
+                    email: u.email,
+                    avatar: u.avatar,
+                    createdAt: new Date(u.created_at).getTime(),
+                    lastSeen: new Date(u.updated_at).getTime(),
+                    lastMessage: u.last_message,
+                    lastMessageSenderId: u.last_message_sender_id,
+                    connections: [],
+                }));
+                setUsers(mappedUsers);
+            })
+            .catch(err => console.error("Failed to fetch users", err));
 
-    // 2. Fetch Presence
+    }, [user]);
+
+    // Listen for new messages globally to update Sidebar list
     useEffect(() => {
-        const statusRef = ref(rtdb, "status");
-        const unsubscribe = onValue(statusRef, (snapshot) => {
-            setPresence(snapshot.val() || {});
-        });
-        return () => unsubscribe();
-    }, []);
+        if (!user || !echo) return;
 
-    // 3. Fetch Chats (for Last Message)
-    useEffect(() => {
-        if (!user) return;
-        const q = query(collection(db, "chats"), where("participantIds", "array-contains", user.uid));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const map: Record<string, any> = {};
-            snapshot.forEach((doc) => {
-                map[doc.id] = doc.data();
+        // Ensure we are authenticated for private channel
+        const token = localStorage.getItem('auth_token');
+        if (token && echo.connector) {
+            echo.connector.options.auth.headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const channelName = `App.Models.User.${user.uid}`;
+        console.log("[Sidebar] Subscribing to channel:", channelName);
+        const channel = echo.private(channelName);
+
+        channel.listen('.UserReceivedMessage', (e: any) => {
+            // e.message is the new message
+            const newMessage = e.message;
+            const messageText = newMessage.text || (newMessage.type === 'image' ? 'Sent an image' : 'Sent a message');
+
+            const sender = newMessage.sender;
+            // Resolve sender UID: Prefer google_id if available (matches sidebar logic)
+            const resolvedSenderId = sender ? (sender.google_id || String(sender.id)) : String(newMessage.sender_id);
+
+            // Check if WE are the sender
+            const isMe = (!!user.id && String(newMessage.sender_id) === String(user.id)) || String(resolvedSenderId) === String(user.uid);
+
+            let targetUserId = resolvedSenderId;
+            let displayMessage = messageText;
+
+            if (isMe) {
+                // If we sent it, we need to find the OTHER user in the chat_id to update their row
+                // chat_id format: uid1_uid2
+                const parts = newMessage.chat_id.split('_');
+                const otherId = parts.find((id: string) => String(id) !== String(user.uid));
+                if (otherId) {
+                    targetUserId = otherId;
+                    displayMessage = messageText; // Keep raw text, let renderer handle prefix
+                }
+            } else {
+                console.log("[Sidebar] Received message FROM OTHERS:", {
+                    senderId: newMessage.sender_id,
+                    resolvedSenderId,
+                    targetUserId: resolvedSenderId
+                });
+                // targetUserId is already resolvedSenderId, which is correct for incoming messages
+            }
+
+            // Update users list (targetUserId is either the sender OR the person we sent to)
+            setUsers(prev => {
+                console.log("[Sidebar] Processing new message:", {
+                    text: messageText,
+                    targetUserId,
+                    isMe,
+                    senderId: newMessage.sender_id,
+                    resolvedSenderId,
+                    hasSender: !!newMessage.sender,
+                    chatId: newMessage.chat_id,
+                    myUid: user.uid
+                });
+
+                const existingUserIndex = prev.findIndex(u =>
+                    String(u.uid) === String(targetUserId) ||
+                    String(u.id) === String(targetUserId) || // Fallback to numeric ID
+                    String(u.uid) === String(newMessage.sender_id) // Match sender_id directly against uid (if targetUserId derivation failed)
+                );
+                if (existingUserIndex !== -1) {
+                    // Move to top and update last message
+                    const newUsers = [...prev];
+                    const [existingUser] = newUsers.splice(existingUserIndex, 1);
+
+                    // New message is unread by default (null read_at)
+                    // UNLESS we are currently looking at this chat
+                    const isActive = activeChatIdRef.current === newMessage.chat_id;
+
+                    // Create a NEW object to ensure React detects the change
+                    const updatedUser = {
+                        ...existingUser,
+                        lastMessage: displayMessage,
+                        lastMessageSenderId: String(newMessage.sender_id),
+                        lastMessageReadAt: isActive ? new Date().toISOString() : null
+                    };
+
+                    console.log("[Sidebar] Updating existing user:", updatedUser);
+                    return [updatedUser, ...newUsers];
+                } else {
+                    // User not in list, we need to fetch them. 
+                    // If isMe is true, it means we sent a message to someone not in our list? 
+                    // Possible if we initiated chat via URL or People page.
+                    // Note: fetchUserAndAdd should also ideally set lastMessageSenderId
+                    fetchUserAndAdd(targetUserId, displayMessage);
+                    return prev;
+                }
             });
-            setChatsMap(map);
         });
-        return () => unsubscribe();
-    }, [user?.uid]);
+
+        return () => {
+            channel.stopListening('.UserReceivedMessage');
+        }
+    }, [user]);
+
+    const fetchUserAndAdd = (uid: string, initialMessage?: string) => {
+        const token = localStorage.getItem('auth_token');
+        fetch(`http://localhost:8000/api/users/${uid}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
+            .then(res => res.json())
+            .then(data => {
+                const newUser: User = {
+                    uid: data.google_id || String(data.id),
+                    id: data.id, // Add this line
+                    displayName: data.name,
+                    email: data.email,
+                    avatar: data.avatar,
+                    createdAt: new Date(data.created_at).getTime(),
+                    lastSeen: new Date(data.updated_at).getTime(),
+                    lastMessage: initialMessage,
+                    lastMessageSenderId: undefined, // Or populate if passed (currently undefined is fine)
+                    connections: [],
+                };
+                setUsers(prev => {
+                    if (prev.find(u => u.uid === newUser.uid)) return prev;
+                    return [newUser, ...prev];
+                });
+            })
+            .catch(err => console.error("Failed to fetch new sender", err));
+    };
+
+    // 2. Fetch specific user if we are in a chat but that user is not in the list (Connect flow)
+    useEffect(() => {
+        if (!user || !params?.chatId) return;
+        const chatId = params.chatId as string;
+
+        // Extract UID from chatId (uid1_uid2)
+        // We know one UID is ours. The other is the target.
+        const parts = chatId.split('_');
+        if (parts.length !== 2) return;
+
+        const otherUid = parts.find(id => id !== String(user.uid));
+        if (!otherUid) return; // Should not happen if chatId is valid
+
+        // Check if this user is already in our list
+        const exists = users.find(u => String(u.uid) === otherUid || String(u.uid) === otherUid);
+        if (exists) return;
+
+        // Fetch this user
+        const token = localStorage.getItem('auth_token');
+        fetch(`http://localhost:8000/api/users/${otherUid}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
+            .then(res => {
+                if (!res.ok) throw new Error("User not found via ID");
+                return res.json();
+            })
+            .then(data => {
+                const newUser: User = {
+                    uid: data.google_id || String(data.id),
+                    displayName: data.name,
+                    email: data.email,
+                    avatar: data.avatar,
+                    createdAt: new Date(data.created_at).getTime(),
+                    lastSeen: new Date(data.updated_at).getTime(),
+                    connections: [],
+                };
+                // Add to users list (prepend so it shows at top)
+                setUsers(prev => {
+                    // Double check existence to avoid race conditions
+                    if (prev.find(u => u.uid === newUser.uid)) return prev;
+                    return [newUser, ...prev];
+                });
+            })
+            .catch(err => console.error("Failed to fetch connected user", err));
+
+    }, [user, params?.chatId, users]); // Depend on users to re-check existence
 
     const createChat = (targetUser: User) => {
         if (!user) return;
+        // Simple chat ID generation: sort UIDs
+        // In real app, might want to create chat on backend and get ID
         const chatId = [user.uid, targetUser.uid].sort().join("_");
+
+        // Optimistically mark as read in sidebar state
+        setUsers(prev => prev.map(u => {
+            if (u.uid === targetUser.uid) {
+                return { ...u, lastMessageReadAt: new Date().toISOString() } as any;
+                // cast to any because User type might not strictly match the extra props we added
+            }
+            return u;
+        }));
+
         router.push(`/chat/${chatId}`);
     };
 
-    const getStatusIndicator = (uid: string) => {
-        const userStatus = presence[uid];
-        if (userStatus?.state === "online") {
+    const getStatusIndicator = (user: User) => {
+        const isOnline = isUserOnline(user.uid);
+        if (isOnline) {
             return (
                 <div className="absolute bottom-0 right-0 shadow-sm rounded-full bg-white p-[1.5px]">
                     <div className="h-3 w-3 rounded-full bg-green-500 ring-2 ring-white"></div>
                 </div>
             );
-        }
+        } else if (user.lastSeen) {
+            let timeAgo = formatDistanceToNow(new Date(user.lastSeen), { addSuffix: false, locale: vi });
+            // Remove prefixes like "khoảng", "dưới", "hơn"
+            timeAgo = timeAgo.replace(/^khoảng\s+/, '')
+                .replace(/^dưới\s+/, '')
+                .replace(/^hơn\s+/, '');
 
-        // Show offline time if available
-        if (userStatus?.last_changed) {
             return (
-                <div className="absolute bottom-0 right-0 transform translate-y-1">
-                    <LastSeen
-                        date={userStatus.last_changed}
-                        format="short"
-                        className="text-[10px] font-bold text-gray-500 bg-white px-1 rounded-sm shadow-sm ring-1 ring-gray-200"
-                    />
+                <div className="absolute -bottom-1 -right-1 shadow-sm rounded-full bg-gray-100 border border-white px-1 py-0.5 flex items-center justify-center">
+                    <span className="text-[10px] font-bold text-gray-500 leading-none whitespace-nowrap">{timeAgo}</span>
                 </div>
             );
         }
-
         return null;
     };
 
-    const getLastMessageText = (targetUid: string, isActive: boolean) => {
-        if (!user) return "";
-        const chatId = [user.uid, targetUid].sort().join("_");
-        const chat = chatsMap[chatId];
+    const getLastMessageText = (targetUid: string, isActive: boolean, lastMsg?: string, lastMsgSenderId?: string, lastMsgReadAt?: string) => {
+        if (lastMsg) {
+            // Check isMe for initial load - robust check against id or uid
+            const isMe = user && (String(lastMsgSenderId) === String(user.id) || String(lastMsgSenderId) === String(user.uid));
+            const prefix = isMe ? "Bạn: " : "";
 
-        if (chat?.lastMessage) {
-            const isMe = chat.lastMessage.senderId === user.uid;
-            const prefix = isMe ? "You: " : "";
+            // Bold if NOT me AND read_at is null (unread)
+            const isUnread = !isMe && !lastMsgReadAt;
+            const textClass = isActive
+                ? "text-white/80"
+                : (isUnread ? "text-gray-900 font-bold" : "text-gray-500");
 
-            // Check if unread (not sent by me, and readBy doesn't include me)
-            const isUnread = !isMe && (!chat.lastMessage.readBy || !chat.lastMessage.readBy.includes(user.uid));
-
-            // Text Color Logic
-            let textColorClass = "text-gray-600";
-            if (isActive) {
-                textColorClass = "text-white/90";
-            } else if (isUnread) {
-                textColorClass = "font-bold text-gray-900";
-            } else {
-                textColorClass = "text-gray-500";
-            }
-
-            // Base style for media (usually slightly different but let's sync)
-            const mediaClass = isActive ? "text-white/90" : (isUnread ? "font-bold text-gray-900" : "text-gray-500");
-
-            // Handle media types
-            if (chat.lastMessage.type === 'image') return <span className={mediaClass}>{prefix}Sent an image</span>;
-            if (chat.lastMessage.type === 'video') return <span className={mediaClass}>{prefix}Sent a video</span>;
-            return <span className={textColorClass}>{prefix}{chat.lastMessage.text}</span>;
+            return <span className={textClass}>{prefix}{lastMsg}</span>;
         }
-
-        return <span className={isActive ? "text-white/70 italic" : "text-gray-400 italic"}>No messages yet</span>;
+        return <span className={isActive ? "text-white/70 italic" : "text-gray-400 italic"}>Start a conversation</span>;
     };
 
     return (
@@ -158,7 +319,7 @@ export default function Sidebar() {
                     </div>
                     <input
                         type="text"
-                        placeholder="Search conversations..."
+                        placeholder="Search users..."
                         className="block w-full rounded-2xl border-0 bg-gray-100 py-2.5 pl-10 pr-4 text-sm text-gray-900 ring-0 transition-all placeholder:text-gray-500 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
@@ -169,21 +330,18 @@ export default function Sidebar() {
             <div className="flex-1 overflow-y-auto px-3 py-2 custom-scrollbar">
                 {filteredUsers.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-center opacity-50">
-                        <p className="text-sm">No contacts found</p>
+                        <p className="text-sm">No users found</p>
                     </div>
                 ) : (
                     <div className="space-y-1">
                         {filteredUsers.map((u) => {
                             const chatId = [user?.uid, u.uid].sort().join("_");
                             const isActive = activeChatId === chatId;
-                            // Check if last message is unread to highlight
-                            const chat = chatsMap[chatId];
-                            const lastMsg = chat?.lastMessage;
-                            const isUnread = lastMsg && lastMsg.senderId !== user?.uid && (!lastMsg.readBy || !lastMsg.readBy.includes(user?.uid));
 
+                            console.log(`[Sidebar] Rendering row [${u.uid}] msg: ${u.lastMessage}`);
                             return (
                                 <button
-                                    key={u.uid}
+                                    key={`${u.uid}-${u.lastMessage}`} // Force re-render on message change
                                     onClick={() => createChat(u)}
                                     className={`group relative flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-all duration-200 
                                         ${isActive
@@ -194,33 +352,24 @@ export default function Sidebar() {
                                     <div className="relative flex-none">
                                         <div className={`rounded-full p-0.5 ${isActive ? 'bg-white/20' : 'bg-transparent'}`}>
                                             <img
-                                                src={u.photoURL || `https://ui-avatars.com/api/?name=${u.displayName}`}
+                                                src={u.avatar || `https://ui-avatars.com/api/?name=${u.displayName}`}
                                                 alt={u.displayName || "User"}
                                                 className="h-12 w-12 rounded-full object-cover bg-gray-200"
                                             />
                                         </div>
-                                        {getStatusIndicator(u.uid)}
+                                        {getStatusIndicator(u)}
                                     </div>
 
-                                    <div className="flex-1 min-w-0 overflow-hidden">
+                                    <div className="flex-1 min-w-0">
                                         <div className="flex justify-between items-baseline mb-0.5">
                                             <p className={`truncate text-sm font-semibold ${isActive ? "text-white" : "text-gray-900"}`}>
                                                 {u.displayName}
                                             </p>
                                         </div>
-                                        <p className={`truncate text-xs ${isActive
-                                            ? "text-white/90"
-                                            : isUnread
-                                                ? "font-bold text-gray-900"
-                                                : "text-gray-500 group-hover:text-gray-600"
-                                            }`}>
-                                            {getLastMessageText(u.uid, isActive)}
+                                        <p className={`truncate text-xs ${isActive ? "text-white/90" : "text-gray-500"}`}>
+                                            {getLastMessageText(u.uid, isActive, (u as any).lastMessage, (u as any).lastMessageSenderId, (u as any).lastMessageReadAt)}
                                         </p>
                                     </div>
-
-                                    {isUnread && !isActive && (
-                                        <div className="h-2.5 w-2.5 flex-none rounded-full bg-blue-600 ring-4 ring-white"></div>
-                                    )}
                                 </button>
                             );
                         })}
