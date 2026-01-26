@@ -4,10 +4,101 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter, usePathname } from "next/navigation";
 
+import { useEffect, useState } from "react";
+import echo from "@/lib/echo";
+
 export default function Header() {
     const { user, logout } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
+    const [unreadCount, setUnreadCount] = useState(0);
+
+    // Fetch unread count
+    const fetchUnreadCount = async () => {
+        if (!user) return;
+        try {
+            const token = localStorage.getItem('auth_token');
+            const res = await fetch('http://localhost:8000/api/messages/unread-count', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setUnreadCount(data.count);
+            }
+        } catch (error) {
+            console.error("Failed to fetch unread count", error);
+        }
+    };
+
+    // Initial fetch - separate effect
+    useEffect(() => {
+        if (!user) return;
+        fetchUnreadCount();
+    }, [user]);
+
+    // WebSocket subscription - only on client side
+    useEffect(() => {
+        if (!user) return;
+
+        // Ensure we're on client side and echo is available
+        if (typeof window === 'undefined' || !echo) {
+            console.log("[Header] Echo not available yet");
+            return;
+        }
+
+        // Delay subscription slightly to ensure Echo is fully connected
+        const subscriptionTimeout = setTimeout(() => {
+            // Ensure Echo is authenticated for private channel
+            const token = localStorage.getItem('auth_token');
+            if (token && echo.connector) {
+                echo.connector.options.auth.headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            // Listen for real-time messages
+            // We use the same channel as Sidebar: App.Models.User.{id}
+            const channelName = `App.Models.User.${user.uid}`; // uid is usually google_id or id
+            console.log("[Header] Subscribing to channel:", channelName);
+
+            const channel = echo.private(channelName);
+
+            const handleMessage = (e: any) => {
+                console.log("[Header] Received UserReceivedMessage:", e);
+                const msg = e.message;
+                if (msg) {
+                    // Check if message is from me
+                    const isFromMe = String(msg.sender_id) === String(user.id);
+
+                    if (!isFromMe) {
+                        console.log("[Header] Incrementing unread count");
+                        setUnreadCount(prev => prev + 1);
+                    }
+                }
+            };
+
+            channel.listen('.UserReceivedMessage', handleMessage);
+
+            // Store cleanup function
+            (window as any).__headerChannelCleanup = () => {
+                console.log("[Header] Cleaning up channel subscription");
+                channel.stopListening('.UserReceivedMessage');
+            };
+        }, 500); // Wait 500ms for Echo to be fully ready
+
+        // Listen for local event to refresh (when user reads messages)
+        const handleRefresh = () => {
+            console.log("[Header] Refreshing unread count");
+            fetchUnreadCount();
+        };
+        window.addEventListener('REFRESH_UNREAD_COUNT', handleRefresh);
+
+        return () => {
+            clearTimeout(subscriptionTimeout);
+            if ((window as any).__headerChannelCleanup) {
+                (window as any).__headerChannelCleanup();
+            }
+            window.removeEventListener('REFRESH_UNREAD_COUNT', handleRefresh);
+        };
+    }, [user]);
 
     const navItems = [
         {
@@ -33,9 +124,16 @@ export default function Header() {
         },
         {
             name: 'Chat', href: '/chat', icon: (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                </svg>
+                <div className="relative">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                    </svg>
+                    {unreadCount > 0 && (
+                        <span className="absolute -top-2.5 -right-3 flex items-center justify-center min-w-[20px] h-[20px] px-1.5 text-[10px] font-bold text-white bg-gradient-to-br from-red-500 via-red-600 to-rose-600 rounded-full border-2 border-white">
+                            {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                    )}
+                </div>
             )
         },
         {

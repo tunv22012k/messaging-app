@@ -21,12 +21,15 @@ const markAsRead = async (chatId: string) => {
     const token = localStorage.getItem('auth_token');
     if (!token) return;
     try {
-        await fetch(`http://localhost:8000/api/chats/${chatId}/read`, {
+        const res = await fetch(`http://localhost:8000/api/chats/${chatId}/read`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`
             }
         });
+        if (res.ok) {
+            window.dispatchEvent(new Event("REFRESH_UNREAD_COUNT"));
+        }
     } catch (e) {
         console.error("Failed to mark as read", e);
     }

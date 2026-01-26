@@ -57,6 +57,7 @@ export default function Sidebar() {
                     lastSeen: new Date(u.updated_at).getTime(),
                     lastMessage: u.last_message,
                     lastMessageSenderId: u.last_message_sender_id,
+                    lastMessageReadAt: u.last_message_read_at, // Map read status from API
                     connections: [],
                 }));
                 setUsers(mappedUsers);
