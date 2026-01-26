@@ -47,8 +47,17 @@ export interface Message {
     };
     readBy?: string[];
     readAt?: string | null;
-    reactions?: { [emoji: string]: string[] }; // emoji -> array of userIds
+    reactions?: MessageReaction[];
     sender?: User; // Add sender relationship for detailed info
+}
+
+export interface MessageReaction {
+    id: number;
+    message_id: number;
+    user_id: number;
+    reaction: string;
+    created_at: string;
+    updated_at: string;
 }
 
 export interface PresenceStatus {

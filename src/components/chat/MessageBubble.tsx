@@ -85,20 +85,34 @@ export default function MessageBubble({
 
 
     const renderReactions = () => {
-        if (!message.reactions || Object.keys(message.reactions).length === 0) return null;
+        if (!message.reactions || message.reactions.length === 0) return null;
+
+        // Group reactions by emoji
+        const params = message.reactions.reduce((acc, curr) => {
+            if (!acc[curr.reaction]) acc[curr.reaction] = [];
+            acc[curr.reaction].push(curr.user_id);
+            return acc;
+        }, {} as Record<string, number[]>);
 
         return (
-            <div className={clsx("absolute -bottom-5 flex gap-1 right-0")}>
-                {Object.entries(message.reactions).map(([emoji, userIds]) => {
+            <div className={clsx(
+                "absolute -bottom-3 flex gap-1 z-10",
+                isOwn ? "right-0" : "left-0"
+            )}>
+                {Object.entries(params).map(([emoji, userIds]) => {
                     const count = userIds.length;
-                    const iReacted = user && userIds.includes(user.uid);
+                    const iReacted = userIds.some(uid =>
+                        String(uid) === String(user?.uid) ||
+                        String(uid) === String(user?.id) ||
+                        String(uid) === String(user?.google_id)
+                    );
 
                     return (
                         <button
                             key={emoji}
                             onClick={() => onReaction?.(message.id, emoji)}
                             className={clsx(
-                                "flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs shadow-sm border transaction-all hover:scale-110",
+                                "flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs shadow-sm border transition-all hover:scale-110",
                                 iReacted ? "bg-blue-100 border-blue-200" : "bg-white border-gray-200"
                             )}
                         >
@@ -130,8 +144,12 @@ export default function MessageBubble({
         </div>
     );
 
+    // Position for the reaction trigger button
+    // Should be outside the bubble to avoid overlap
+    const triggerPosition = isOwn ? "left-0 -ml-8" : "right-0 -mr-8";
+
     return (
-        <div className={clsx("flex group relative", isOwn ? "justify-end" : "justify-start", showAvatar ? "mt-2" : "")}>
+        <div className={clsx("flex group relative mb-2", isOwn ? "justify-end" : "justify-start", showAvatar ? "mt-2" : "")}>
             {!isOwn && <Avatar />}
 
             <div className="relative">
@@ -140,18 +158,20 @@ export default function MessageBubble({
                     <div
                         ref={pickerRef}
                         className={clsx(
-                            "absolute flex gap-1 bg-white rounded-full shadow-lg border border-gray-200 p-1.5 z-50 animate-in fade-in zoom-in duration-200",
-                            isOwn ? "top-full right-0 mt-2" : "top-full left-0 mt-2"
+                            "absolute flex gap-1 bg-white rounded-full shadow-xl border border-gray-100 p-1.5 z-50 animate-in fade-in zoom-in duration-200",
+                            isOwn ? "bottom-full right-0 mb-2" : "bottom-full left-0 mb-2"
                         )}
+                        style={{ minWidth: "max-content" }}
                     >
                         {REACTION_EMOJIS.map(emoji => (
                             <button
                                 key={emoji}
-                                onClick={() => {
+                                onClick={(e) => {
+                                    e.stopPropagation();
                                     onReaction?.(message.id, emoji);
                                     setShowPicker(false);
                                 }}
-                                className="hover:bg-gray-100 p-1.5 rounded-full text-xl leading-none transition-transform hover:scale-125"
+                                className="hover:bg-gray-100 p-2 rounded-full text-xl leading-none transition-transform hover:scale-125 hover:-translate-y-1"
                             >
                                 {emoji}
                             </button>
@@ -161,23 +181,23 @@ export default function MessageBubble({
 
                 <div
                     className={clsx(
-                        "rounded-2xl px-4 py-2 shadow-sm relative",
+                        "rounded-2xl px-4 py-2 shadow-sm relative border border-transparent",
                         isOwn
                             ? "bg-blue-600 text-white rounded-tr-sm"
-                            : "bg-white text-gray-900 rounded-tl-sm"
+                            : "bg-white text-gray-900 rounded-tl-sm border-gray-200"
                     )}
                 >
                     {renderContent()}
                     <div
                         className={clsx(
-                            "mt-1 text-xs flex items-center justify-end gap-1",
+                            "mt-1 text-[10px] flex items-center justify-end gap-1 opacity-70",
                             isOwn ? "text-blue-100" : "text-gray-400"
                         )}
                     >
                         <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         {isOwn && message.readBy && message.readBy.length > 1 && (
                             /* Simple clean double-check icon */
-                            <svg className="w-4 h-4 ml-1 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+                            <svg className="w-3.5 h-3.5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M0 0h24v24H0V0z" fill="none" />
                                 <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.41 11.93 6 13.34l5.66 5.66 12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
                             </svg>
@@ -187,10 +207,13 @@ export default function MessageBubble({
 
                 {/* Add Reaction Button Trigger */}
                 <button
-                    onClick={() => setShowPicker(!showPicker)}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        setShowPicker(!showPicker);
+                    }}
                     className={clsx(
-                        "absolute -bottom-6 p-1 text-gray-400 hover:text-yellow-500 opacity-0 group-hover:opacity-100 transition-all duration-200",
-                        isOwn ? "right-0" : "right-0"
+                        "absolute top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-yellow-500 hover:bg-gray-100 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200",
+                        isOwn ? "-left-10" : "-right-10"
                     )}
                     title="Add reaction"
                 >
@@ -202,8 +225,6 @@ export default function MessageBubble({
                 {/* Render Existing Reactions */}
                 {renderReactions()}
             </div>
-
-
         </div>
     );
 }

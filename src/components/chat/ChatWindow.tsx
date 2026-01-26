@@ -274,6 +274,17 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
             }
         });
 
+        // Listen for Reactions
+        chatChannel.listen('.MessageReactionUpdated', (e: any) => {
+            console.log("Received .MessageReactionUpdated event:", e);
+            setMessages(prev => prev.map(m => {
+                if (String(m.id) === String(e.messageId)) {
+                    return { ...m, reactions: e.reactions };
+                }
+                return m;
+            }));
+        });
+
         return () => {
             // Only stop specific listeners
             userChannel.stopListening('.MessageRead');
@@ -329,6 +340,74 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
             }
         } catch (error) {
             console.error("Failed to send message", error);
+        }
+    };
+
+    const handleReaction = async (messageId: string, emoji: string) => {
+        if (!user) return;
+        const token = localStorage.getItem('auth_token');
+        const socketId = echo?.connector?.pusher?.connection?.socket_id;
+
+        // Helper to get raw ID regardless of type
+        const myId = user.id ? String(user.id) : null;
+        const myUid = user.uid ? String(user.uid) : null;
+
+        // Optimistic update
+        setMessages(prev => prev.map(m => {
+            if (String(m.id) === String(messageId)) {
+                const currentReactions = m.reactions || [];
+
+                // Check if I already have this exact reaction
+                const existingIndex = currentReactions.findIndex(r =>
+                    r.reaction === emoji &&
+                    (String(r.user_id) === String(myId) || String(r.user_id) === String(myUid) || String(r.user_id) === String(user.google_id))
+                );
+
+                let newReactions = [...currentReactions];
+
+                if (existingIndex !== -1) {
+                    // Remove it (Toggle off)
+                    newReactions.splice(existingIndex, 1);
+                } else {
+                    // Add new reaction
+                    newReactions.push({
+                        id: Date.now(), // Temp unique ID
+                        message_id: Number(messageId),
+                        user_id: Number(myId || 0), // Fallback ID
+                        reaction: emoji,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    });
+                }
+
+                return { ...m, reactions: newReactions };
+            }
+            return m;
+        }));
+
+        try {
+            const res = await fetch(`http://localhost:8000/api/messages/${messageId}/react`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/json',
+                    ...(socketId ? { 'X-Socket-ID': socketId } : {})
+                },
+                body: JSON.stringify({ reaction: emoji })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                setMessages(prev => prev.map(m => {
+                    if (String(m.id) === String(messageId)) {
+                        return { ...m, reactions: data.reactions };
+                    }
+                    return m;
+                }));
+            }
+        } catch (err) {
+            console.error("Failed to send reaction", err);
         }
     };
 
@@ -471,6 +550,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
                                             showAvatar={showAvatar}
                                             isMe={isMe}
                                             avatarUrl={avatarUrl}
+                                            onReaction={handleReaction}
                                         />
                                         {/* Seen Indicator */}
                                         {isMe && msg.id === lastReadMessageId && (
