@@ -1,51 +1,151 @@
 "use client";
 
 import { use, useEffect, useState, useMemo } from "react";
-import { VENUES, Venue } from "@/data/venues";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 
+// Types matching Backend Response (simplified)
+interface Booking {
+    court_id: number;
+    start_time: string; // H:i
+    end_time: string;
+}
+
+interface Court {
+    id: number;
+    name: string;
+    type: string;
+}
+
+interface VenueExtra {
+    id: number;
+    name: string;
+    price: number;
+}
+
+interface VenueReview {
+    id: number;
+    user: { name: string };
+    rating: number;
+    comment: string;
+    created_at: string;
+}
+
+interface Venue {
+    id: number;
+    name: string;
+    type: string;
+    address: string;
+    description: string;
+    price_info: string;
+    image: string;
+    courts: Court[];
+    extras: VenueExtra[];
+    reviews: VenueReview[];
+}
+
 export default function VenueDetailPage({ params }: { params: Promise<{ venueId: string }> }) {
     const { venueId } = use(params);
-    const venue = VENUES.find(v => v.id === venueId);
-
-    if (!venue) {
-        notFound();
-    }
-
     const router = useRouter();
+
+    const [venue, setVenue] = useState<Venue | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
     const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
-    const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
+    const [bookings, setBookings] = useState<Booking[]>([]); // Bookings for selected date
+
+    // Form State
+    const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]); // Format: "courtId_startTime"
     const [selectedExtraIds, setSelectedExtraIds] = useState<string[]>([]);
     const [isBooked, setIsBooked] = useState(false);
 
-    // Default to the first court if available
-    const [selectedCourtId, setSelectedCourtId] = useState<string>(venue.courts[0]?.id || "");
+    // Default court selection for tabs (if many courts)
+    const [selectedCourtId, setSelectedCourtId] = useState<string>("");
 
-    // Review State
-    const [reviews, setReviews] = useState(venue.reviews);
+    // Review State (Local only for now, can implement POST later)
     const [newReview, setNewReview] = useState({ rating: 5, comment: "" });
 
-    // Import auth to get user name (mocking for now if needed, but better to use real)
-    // Actually I should move the import to top level, but for this edit I'll assume context is available or valid
-    // I need to import { useAuth } from "@/context/AuthContext" at top level.
-    // I will mock the user name here for simplicity if I can't easily add import in this block.
-    // Wait, I can add import in a separate tool call if needed, but let's try to assume "User" if not available.
-    // Let's rely on a mock "You" for now to avoid compilation errors if useAuth isn't imported.
-    // Ah, I *can* use `useAuth` if I added the import. I'll add the import in a separate step or just use "Guest" for now.
+    // Fetch Venue
+    useEffect(() => {
+        fetch(`http://localhost:8000/api/venues/${venueId}`)
+            .then(res => {
+                if (!res.ok) throw new Error("Venue not found");
+                return res.json();
+            })
+            .then((data: Venue) => {
+                setVenue(data);
+                if (data.courts.length > 0) {
+                    setSelectedCourtId(String(data.courts[0].id));
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                setError("Venue not found");
+            })
+            .finally(() => setIsLoading(false));
+    }, [venueId]);
 
-    const handleReviewSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        const review = {
-            id: Date.now().toString(),
-            userName: "You", // In real app, get from auth
-            rating: newReview.rating,
-            comment: newReview.comment,
-            date: new Date().toISOString().split('T')[0]
-        };
-        setReviews([review, ...reviews]);
-        setNewReview({ rating: 5, comment: "" });
-    };
+    // Fetch Bookings when Date changes
+    useEffect(() => {
+        if (!venueId) return;
+
+        fetch(`http://localhost:8000/api/venues/${venueId}/bookings?date=${bookingDate}`)
+            .then(res => res.json())
+            .then(data => setBookings(data))
+            .catch(err => console.error("Failed to fetch bookings", err));
+    }, [venueId, bookingDate]);
+
+    // Generate Available Slots Logic
+    const availableSlots = useMemo(() => {
+        if (!venue || !selectedCourtId) return [];
+
+        const court = venue.courts.find(c => String(c.id) === selectedCourtId);
+        if (!court) return [];
+
+        // Generate hours from 6:00 to 22:00
+        const slots = [];
+        for (let hour = 6; hour < 22; hour++) {
+            const startTime = `${hour.toString().padStart(2, '0')}:00`;
+            const endTime = `${(hour + 1).toString().padStart(2, '0')}:00`;
+
+            // Simpler check: Does any booking overlap strictly?
+            // Backend returns H:i:s, assume H:i prefix match or standard formatted strings
+            // Ideally parse time. For simplicity, string compare if H:i format matches
+
+            const isBooked = bookings.some(b => {
+                if (String(b.court_id) !== selectedCourtId) return false;
+
+                // Convert to comparable values (minutes from midnight)
+                const [bh, bm] = b.start_time.split(':').map(Number);
+                const [eh, em] = b.end_time.split(':').map(Number);
+                const bStart = bh * 60 + bm;
+                const bEnd = eh * 60 + em;
+
+                const slotStart = hour * 60;
+                const slotEnd = (hour + 1) * 60;
+
+                // Overlap: Start < End AND End > Start
+                return bStart < slotEnd && bEnd > slotStart;
+            });
+
+            // Parse price info (rough heuristic or fixed)
+            // Use fake fixed price for all slots if price_info is text
+            // "80,000 VND/h" -> 80000
+            const price = parseInt(venue.price_info.replace(/\D/g, '')) || 100000;
+
+            slots.push({
+                id: `${selectedCourtId}_${startTime}`,
+                courtId: selectedCourtId,
+                startTime,
+                endTime,
+                price,
+                isBooked
+            });
+        }
+        return slots;
+    }, [venue, selectedCourtId, bookings]);
+
 
     const handleSlotToggle = (slotId: string) => {
         setSelectedSlotIds(prev =>
@@ -68,46 +168,83 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
     };
 
     const totalPrice = useMemo(() => {
-        // Find slot in any court (IDs should be unique enough, or we search in selectedCourt)
-        // Flatten all slots from all courts for easier finding
-        const allSlots = venue.courts.flatMap(c => c.slots);
+        const slotsTotal = availableSlots
+            .filter(s => selectedSlotIds.includes(s.id))
+            .reduce((sum, s) => sum + s.price, 0);
 
-        const slotsTotal = allSlots
-            .filter(slot => selectedSlotIds.includes(slot.id))
-            .reduce((sum, slot) => sum + slot.price, 0);
-
-        const extrasTotal = venue.extras
-            .filter(extra => selectedExtraIds.includes(extra.id))
-            .reduce((sum, extra) => sum + extra.price, 0);
-
-        // Extras are charged once per booking in this simple model, 
-        // or per slot? Usually per booking or per hour. 
-        // Let's assume per booking for simplicity unless specified otherwise.
+        const extrasTotal = (venue?.extras || [])
+            .filter(e => selectedExtraIds.includes(String(e.id)))
+            .reduce((sum, e) => sum + Number(e.price), 0);
 
         return slotsTotal + extrasTotal;
-    }, [selectedSlotIds, selectedExtraIds, venue]);
+    }, [availableSlots, selectedSlotIds, selectedExtraIds, venue]);
 
-    const handleBook = (e: React.FormEvent) => {
+    const handleBook = async (e: React.FormEvent) => {
         e.preventDefault();
         if (selectedSlotIds.length === 0) {
             alert("Please select at least one time slot.");
             return;
         }
 
-        const court = venue.courts.find(c => c.id === selectedCourtId);
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+            alert("Please login to book.");
+            return;
+        }
 
-        const queryParams = new URLSearchParams({
-            venueId: venue.id,
-            venueName: venue.name,
-            courtName: court?.name || "Unknown Court",
-            date: bookingDate,
-            total: totalPrice.toString(),
-            slotCount: selectedSlotIds.length.toString(),
-            // Pass minimal data in URL to avoid length limits
-            // In a real app, we'd POST to an API and get a session ID
-        });
+        // Create booking for the FIRST selected slot (Simplification: 1 slot = 1 booking request)
+        // Or loop?
+        // Let's assume user picks 1 slot or we create multiple bookings.
+        // For MVP, if multiple slots selected, we probably want 1 booking if contiguous?
+        // But our Backend Booking model is 1 booking per row (start-end).
+        // Let's create multiple bookings for now to be safe and simple.
 
-        router.push(`/payment?${queryParams.toString()}`);
+        setIsBooked(false); // Reset state
+
+        try {
+            for (const slotId of selectedSlotIds) {
+                const slot = availableSlots.find(s => s.id === slotId);
+                if (!slot) continue;
+
+                const res = await fetch('http://localhost:8000/api/bookings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        court_id: slot.courtId,
+                        date: bookingDate,
+                        start_time: slot.startTime,
+                        end_time: slot.endTime,
+                        total_price: slot.price
+                    })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.message || 'Booking failed');
+                }
+            }
+
+            // If all success
+            setIsBooked(true);
+            setBookings([]); // Trigger refresh?
+            // Force refresh bookings
+            fetch(`http://localhost:8000/api/venues/${venueId}/bookings?date=${bookingDate}`)
+                .then(res => res.json())
+                .then(data => setBookings(data));
+
+            setSelectedSlotIds([]); // Clear selection
+
+        } catch (err: any) {
+            alert(`Booking failed: ${err.message}`);
+        }
+    };
+
+    const handleReviewSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        alert("Review submission not implemented in Phase 1.");
     };
 
     // Helper to check if slot is in the past
@@ -119,10 +256,8 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
         const slotDate = new Date(date);
         slotDate.setHours(0, 0, 0, 0);
 
-        // If date is in past
         if (slotDate < today) return true;
 
-        // If date is today, check time
         if (slotDate.getTime() === today.getTime()) {
             const [hours, minutes] = startTime.split(':').map(Number);
             const slotTime = new Date(today);
@@ -133,36 +268,41 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
         return false;
     };
 
-    const availableSlots = useMemo(() => {
-        const court = venue.courts.find(c => c.id === selectedCourtId);
-        if (!court) return [];
-        return court.slots.filter(s => s.date === bookingDate);
-    }, [venue, selectedCourtId, bookingDate]);
+    if (isLoading) {
+        return (
+            <div className="flex h-full items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+        );
+    }
 
+    if (error || !venue) {
+        return (
+            <div className="flex h-full items-center justify-center flex-col gap-4">
+                <h2 className="text-xl font-bold text-gray-800">Venue Not Found</h2>
+                <button onClick={() => router.back()} className="text-blue-600 hover:underline">Go Back</button>
+            </div>
+        );
+    }
+
+    // UI Render matches original effectively
     return (
-        <div className="h-full bg-gray-50 p-6 overflow-y-auto">
+        <div className="h-full bg-gray-50 p-6 overflow-y-auto w-full">
             <div className="max-w-4xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
 
-                {/* 1. Venue Info Card (Left Top) */}
+                {/* 1. Venue Info Card */}
                 <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     <div className="h-48 bg-gray-200 relative">
+                        {/* Placeholder or Image */}
                         <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                            <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
+                            <span className="text-4xl">🏟️</span>
                         </div>
                     </div>
                     <div className="p-6">
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <h1 className="text-2xl font-bold text-gray-900">{venue.name}</h1>
-                                <p className="text-gray-500 text-sm flex items-center mt-1">
-                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                                    </svg>
-                                    {venue.address}
-                                </p>
+                                <p className="text-gray-500 text-sm mt-1">{venue.address}</p>
                             </div>
                             <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded capitalize">
                                 {venue.type}
@@ -172,7 +312,7 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                     </div>
                 </div>
 
-                {/* 2. Booking Form (Mobile: Middle, Desktop: Right Column) */}
+                {/* 2. Booking Form */}
                 <div className="lg:col-span-1 lg:row-start-1 lg:row-span-2">
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sticky top-6">
                         {!isBooked ? (
@@ -180,13 +320,13 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                 <div>
                                     <h3 className="font-bold text-gray-900 mb-4">Book Venue</h3>
 
-                                    {/* Date Selection */}
+                                    {/* Date */}
                                     <div className="mb-4">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
                                         <input
                                             type="date"
                                             required
-                                            className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2"
+                                            className="w-full rounded-lg border-gray-300 p-2 border"
                                             value={bookingDate}
                                             onChange={e => setBookingDate(e.target.value)}
                                         />
@@ -196,121 +336,88 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                     {venue.courts.length > 0 && (
                                         <div className="mb-4">
                                             <label className="block text-sm font-medium text-gray-700 mb-2">Select Court</label>
-
-                                            {venue.courts.length > 3 ? (
-                                                <div className="relative">
-                                                    <select
-                                                        value={selectedCourtId}
-                                                        onChange={(e) => setSelectedCourtId(e.target.value)}
-                                                        className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-2.5 appearance-none bg-white"
+                                            <div className="flex gap-2 p-1 bg-gray-100 rounded-lg overflow-x-auto">
+                                                {venue.courts.map(court => (
+                                                    <button
+                                                        key={court.id}
+                                                        type="button"
+                                                        onClick={() => setSelectedCourtId(String(court.id))}
+                                                        className={`
+                                                             flex-1 py-1.5 px-3 text-sm font-medium rounded-md whitespace-nowrap transition-all
+                                                             ${selectedCourtId === String(court.id)
+                                                                ? 'bg-white text-blue-700 shadow-sm'
+                                                                : 'text-gray-500 hover:text-gray-700'
+                                                            }
+                                                         `}
                                                     >
-                                                        {venue.courts.map(court => (
-                                                            <option key={court.id} value={court.id}>
-                                                                {court.name}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
-                                                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" /></svg>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="flex gap-2 p-1 bg-gray-100 rounded-lg overflow-x-auto">
-                                                    {venue.courts.map(court => (
-                                                        <button
-                                                            key={court.id}
-                                                            type="button"
-                                                            onClick={() => setSelectedCourtId(court.id)}
-                                                            className={`
-                                                                flex-1 py-1.5 px-3 text-sm font-medium rounded-md whitespace-nowrap transition-all
-                                                                ${selectedCourtId === court.id
-                                                                    ? 'bg-white text-blue-700 shadow-sm'
-                                                                    : 'text-gray-500 hover:text-gray-700'
-                                                                }
-                                                            `}
-                                                        >
-                                                            {court.name}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
+                                                        {court.name}
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
                                     )}
 
-                                    {/* Slot Selection */}
+                                    {/* Slots */}
                                     <div className="mb-4">
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Available Slots</label>
-                                        {availableSlots.length > 0 ? (
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {availableSlots.map(slot => {
-                                                    const isPast = isSlotPast(slot.date, slot.startTime);
-                                                    const isDisabled = slot.isBooked || isPast;
+                                        <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                                            {availableSlots.map(slot => {
+                                                const isPast = isSlotPast(bookingDate, slot.startTime);
+                                                const isDisabled = slot.isBooked || isPast;
 
-                                                    return (
-                                                        <button
-                                                            key={slot.id}
-                                                            type="button"
-                                                            disabled={isDisabled}
-                                                            onClick={() => handleSlotToggle(slot.id)}
-                                                            className={`
-                                                                relative text-sm py-2 px-3 rounded-lg border transition-all text-center
-                                                                ${isDisabled
-                                                                    ? slot.isBooked
-                                                                        ? 'bg-red-50 text-red-300 border-red-100 cursor-not-allowed' // Booked
-                                                                        : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' // Past
-                                                                    : selectedSlotIds.includes(slot.id)
-                                                                        ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' // Selected
-                                                                        : 'bg-white border-gray-200 text-gray-700 hover:border-blue-300' // Available
-                                                                }
-                                                            `}
-                                                        >
-                                                            <div className="font-medium">{slot.startTime} - {slot.endTime}</div>
-                                                            <div className="text-xs opacity-75">
-                                                                {isDisabled
-                                                                    ? (slot.isBooked ? 'Booked' : 'Expired')
-                                                                    : formatCurrency(slot.price)}
-                                                            </div>
-
-                                                            {/* Booked Mask (Optional extra visual) */}
-                                                            {slot.isBooked && (
-                                                                <div className="absolute inset-0 bg-red-100/10 rounded-lg"></div>
-                                                            )}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : (
-                                            <p className="text-sm text-red-500">No slots available for this date.</p>
-                                        )}
+                                                return (
+                                                    <button
+                                                        key={slot.id}
+                                                        type="button"
+                                                        disabled={isDisabled}
+                                                        onClick={() => handleSlotToggle(slot.id)}
+                                                        className={`
+                                                            relative text-sm py-2 px-3 rounded-lg border transition-all text-center
+                                                            ${isDisabled
+                                                                ? slot.isBooked
+                                                                    ? 'bg-red-50 text-red-300 border-red-100'
+                                                                    : 'bg-gray-100 text-gray-400 border-gray-200'
+                                                                : selectedSlotIds.includes(slot.id)
+                                                                    ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500'
+                                                                    : 'bg-white border-gray-200 text-gray-700 hover:border-blue-300'
+                                                            }
+                                                        `}
+                                                    >
+                                                        <div className="font-medium">{slot.startTime} - {slot.endTime}</div>
+                                                        <div className="text-xs opacity-75">
+                                                            {isDisabled
+                                                                ? (slot.isBooked ? 'Booked' : 'Expired')
+                                                                : formatCurrency(slot.price)}
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
 
-                                    {/* Extras Selection */}
+                                    {/* Extras */}
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">Extra Options</label>
-                                        {venue.extras.length > 0 ? (
-                                            <div className="space-y-2">
-                                                {venue.extras.map(extra => (
-                                                    <label key={extra.id} className="flex items-center justify-between p-2 border border-gray-100 rounded-lg hover:bg-gray-50 cursor-pointer">
-                                                        <div className="flex items-center">
-                                                            <input
-                                                                type="checkbox"
-                                                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                                                                checked={selectedExtraIds.includes(extra.id)}
-                                                                onChange={() => handleExtraToggle(extra.id)}
-                                                            />
-                                                            <span className="ml-2 text-sm text-gray-700">{extra.name}</span>
-                                                        </div>
-                                                        <span className="text-xs font-semibold text-gray-500">{formatCurrency(extra.price)}</span>
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <p className="text-sm text-gray-400">No extra options available.</p>
-                                        )}
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">Extras</label>
+                                        <div className="space-y-2">
+                                            {venue.extras.map(extra => (
+                                                <label key={extra.id} className="flex items-center justify-between p-2 border border-gray-100 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                                    <div className="flex items-center">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="h-4 w-4 text-blue-600 rounded"
+                                                            checked={selectedExtraIds.includes(String(extra.id))}
+                                                            onChange={() => handleExtraToggle(String(extra.id))}
+                                                        />
+                                                        <span className="ml-2 text-sm text-gray-700">{extra.name}</span>
+                                                    </div>
+                                                    <span className="text-xs font-semibold text-gray-500">{formatCurrency(Number(extra.price))}</span>
+                                                </label>
+                                            ))}
+                                        </div>
                                     </div>
                                 </div>
 
-                                {/* Total Price & Action */}
+                                {/* Total */}
                                 <div className="border-t pt-4">
                                     <div className="flex justify-between items-center mb-4">
                                         <span className="text-gray-600 font-medium">Total Price</span>
@@ -319,7 +426,7 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                     <div className="flex gap-3">
                                         <button
                                             type="submit"
-                                            className="flex-1 bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition shadow-lg shadow-blue-200"
+                                            className="flex-1 bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 transition shadow-lg"
                                         >
                                             Book Now
                                         </button>
@@ -328,126 +435,47 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                             onClick={() => router.back()}
                                             className="px-4 py-3 border border-gray-200 text-gray-600 font-medium rounded-xl hover:bg-gray-50 transition"
                                         >
-                                            Close
+                                            Cancel
                                         </button>
                                     </div>
                                 </div>
                             </form>
                         ) : (
                             <div className="bg-green-50 text-green-800 p-6 rounded-xl text-center">
-                                <svg className="w-16 h-16 mx-auto text-green-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
                                 <h3 className="text-2xl font-bold mb-2">Booking Success!</h3>
-                                <p className="mb-6 opacity-80">
-                                    You have booked <strong>{venue.name}</strong> on {new Date(bookingDate).toLocaleDateString()}.
-                                </p>
-                                <div className="space-y-3">
-                                    <Link
-                                        href="/map"
-                                        className="block w-full bg-white border border-green-200 text-green-700 px-4 py-2 rounded-lg font-medium hover:bg-green-100 transition"
-                                    >
-                                        Back to Map
-                                    </Link>
-                                    <button
-                                        onClick={() => {
-                                            setIsBooked(false);
-                                            setSelectedSlotIds([]);
-                                            setSelectedExtraIds([]);
-                                        }}
-                                        className="block w-full text-sm text-green-600 hover:underline"
-                                    >
-                                        Book another slot
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* 3. Reviews Section (Left Bottom) */}
-                <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                    <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-lg font-bold text-gray-900">Reviews & Ratings</h3>
-                        <span className="text-sm text-gray-500">{reviews.length} reviews</span>
-                    </div>
-
-                    {/* Review List */}
-                    <div className="space-y-6 mb-8">
-                        {reviews.length > 0 ? (
-                            reviews.map(review => (
-                                <div key={review.id} className="border-b border-gray-100 pb-6 last:border-0 last:pb-0">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-600">
-                                                {review.userName.charAt(0)}
-                                            </div>
-                                            <div>
-                                                <div className="font-bold text-gray-900">{review.userName}</div>
-                                                <div className="text-xs text-gray-500">{review.date}</div>
-                                            </div>
-                                        </div>
-                                        <div className="flex bg-yellow-50 px-2 py-1 rounded-lg">
-                                            {[...Array(5)].map((_, i) => (
-                                                <svg key={i} className={`w-4 h-4 ${i < review.rating ? 'text-yellow-400' : 'text-gray-200'}`} fill="currentColor" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                                </svg>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <p className="text-gray-600 leading-relaxed">{review.comment}</p>
-                                </div>
-                            ))
-                        ) : (
-                            <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                                No reviews yet. Be the first to review!
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Add Review Form */}
-                    <div className="bg-gray-50 rounded-xl p-6 border border-gray-100">
-                        <h4 className="font-bold text-gray-900 mb-4">Write a Review</h4>
-                        <form onSubmit={handleReviewSubmit}>
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Rating</label>
-                                <div className="flex gap-2">
-                                    {[1, 2, 3, 4, 5].map((star) => (
-                                        <button
-                                            key={star}
-                                            type="button"
-                                            onClick={() => setNewReview(prev => ({ ...prev, rating: star }))}
-                                            className="focus:outline-none transition-transform hover:scale-110"
-                                        >
-                                            <svg className={`w-8 h-8 ${star <= newReview.rating ? 'text-yellow-400' : 'text-gray-300'}`} fill="currentColor" viewBox="0 0 20 20">
-                                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                            </svg>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Comment</label>
-                                <textarea
-                                    required
-                                    rows={3}
-                                    className="w-full rounded-lg border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 border p-3 text-sm"
-                                    placeholder="Share your experience..."
-                                    value={newReview.comment}
-                                    onChange={e => setNewReview(prev => ({ ...prev, comment: e.target.value }))}
-                                />
-                            </div>
-                            <div className="flex justify-end">
+                                <p className="mb-6">You have successfully booked this venue.</p>
                                 <button
-                                    type="submit"
-                                    className="bg-gray-900 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition shadow-sm"
+                                    onClick={() => {
+                                        setIsBooked(false);
+                                        setSelectedSlotIds([]);
+                                    }}
+                                    className="block w-full text-sm text-green-600 hover:underline"
                                 >
-                                    Post Review
+                                    Book another slot
                                 </button>
+                                <Link href="/my-bookings" className="block mt-4 text-green-700 font-bold underline">
+                                    Go to My Bookings
+                                </Link>
                             </div>
-                        </form>
+                        )}
                     </div>
                 </div>
+
+                {/* 3. Reviews */}
+                <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <h3 className="text-lg font-bold text-gray-900 mb-6">Reviews ({venue.reviews.length})</h3>
+                    <div className="space-y-6">
+                        {venue.reviews.map(review => (
+                            <div key={review.id} className="border-b border-gray-100 pb-6 last:border-0">
+                                <div className="font-bold">{review.user?.name || 'User'}</div>
+                                <div className="text-yellow-400 text-sm">{'⭐'.repeat(review.rating)}</div>
+                                <p className="text-gray-600 mt-1">{review.comment}</p>
+                            </div>
+                        ))}
+                        {venue.reviews.length === 0 && <p className="text-gray-500">No reviews yet.</p>}
+                    </div>
+                </div>
+
             </div>
         </div>
     );

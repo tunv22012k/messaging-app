@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from "@react-google-maps/api";
-import { VENUES, Venue } from "@/data/venues";
+import { Venue } from "@/data/venues";
 import Link from "next/link";
 
 const containerStyle = {
@@ -29,11 +29,55 @@ export default function MapPage() {
         libraries: LIBRARIES
     });
 
+    const [venues, setVenues] = useState<Venue[]>([]);
+    const [isLoadingVenues, setIsLoadingVenues] = useState(true);
+
     const [map, setMap] = useState<google.maps.Map | null>(null);
     const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
     const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+    // Fetch Venues
+    useEffect(() => {
+        fetch('http://localhost:8000/api/venues')
+            .then(res => res.json())
+            .then((data: any[]) => {
+                const mappedVenues: Venue[] = data.map(v => ({
+                    id: String(v.id),
+                    name: v.name,
+                    type: v.type,
+                    location: {
+                        lat: Number(v.lat),
+                        lng: Number(v.lng)
+                    },
+                    address: v.address,
+                    price: v.price_info,
+                    description: v.description,
+                    image: v.image,
+                    courts: v.courts.map((c: any) => ({
+                        id: String(c.id),
+                        name: c.name,
+                        slots: [] // Slots handled in detail page or separate call? For map we don't need slots yet
+                    })),
+                    extras: v.extras.map((e: any) => ({
+                        id: String(e.id),
+                        name: e.name,
+                        price: Number(e.price)
+                    })),
+                    reviews: v.reviews.map((r: any) => ({
+                        id: String(r.id),
+                        userName: r.user?.name || 'User', // Handle potential missing user relation
+                        rating: r.rating,
+                        comment: r.comment,
+                        date: r.date || r.created_at
+                    }))
+                }));
+                setVenues(mappedVenues);
+            })
+            .catch(err => console.error("Failed to fetch venues", err))
+            .finally(() => setIsLoadingVenues(false));
+    }, []);
 
     // Get User Location on Mount
     useEffect(() => {
@@ -53,13 +97,15 @@ export default function MapPage() {
     }, []);
 
     const filteredVenues = useMemo(() => {
+        if (!searchQuery.trim()) return venues; // Return all if empty? Original logic returned empty if empty
         if (!searchQuery.trim()) return [];
+
         const lowerQuery = searchQuery.toLowerCase();
-        return VENUES.filter(venue =>
+        return venues.filter(venue =>
             venue.name.toLowerCase().includes(lowerQuery) ||
             venue.address.toLowerCase().includes(lowerQuery)
         );
-    }, [searchQuery]);
+    }, [searchQuery, venues]);
 
     const handleSearchSelect = (venue: Venue) => {
         setSearchQuery(venue.name);
@@ -174,7 +220,7 @@ export default function MapPage() {
                 onUnmount={onUnmount}
                 options={OPTIONS}
             >
-                {VENUES.map((venue) => (
+                {venues.map((venue) => (
                     <Marker
                         key={venue.id}
                         position={venue.location}
@@ -201,7 +247,7 @@ export default function MapPage() {
                             <p className="text-xs text-gray-500 mb-3">{selectedVenue.address}</p>
 
                             <Link
-                                href={`/map/${selectedVenue.id}`}
+                                href={`/booking/${selectedVenue.id}`}
                                 className="block w-full text-center bg-blue-600 text-white py-1.5 px-3 rounded hover:bg-blue-700 transition active:scale-95"
                             >
                                 Book Now

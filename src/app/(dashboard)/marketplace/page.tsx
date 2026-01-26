@@ -1,105 +1,208 @@
 "use client";
 
-import Image from "next/image";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { MOCK_BOOKINGS } from "@/data/bookings";
+import { useRouter } from "next/navigation";
+
+interface MarketplaceItem {
+    id: number;
+    venueName: string;
+    venueImage?: string; // Optional
+    courtName: string;
+    date: string;
+    time: string;
+    price: number;
+    transferPrice: number;
+    transferNote?: string;
+    status: string;
+}
 
 export default function MarketplacePage() {
-    // Filter bookings that are available for transfer
-    const availableBookings = MOCK_BOOKINGS.filter(
-        b => b.isForTransfer && b.transferStatus === 'available'
-    );
+    const router = useRouter();
+    const [activeFilter, setActiveFilter] = useState("all");
+    const [listings, setListings] = useState<MarketplaceItem[]>([]);
+    const [loading, setLoading] = useState(true);
 
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
+    useEffect(() => {
+        fetch('http://localhost:8000/api/marketplace')
+            .then(async res => {
+                if (res.status === 401) {
+                    const token = localStorage.getItem('auth_token');
+                    if (token) {
+                        return fetch('http://localhost:8000/api/marketplace', {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                    }
+                    // If public, backend should allow public access. Currently middleware protects it.
+                    // Assuming middleware auth:sanctum is on.
+                    // If user not logged in, we might show empty or error.
+                    // For now, allow 401 to fail.
+                    throw new Error("Unauthorized");
+                }
+                return res;
+            })
+            .then(res => res.json())
+            .then((data: any[]) => {
+                const mapped: MarketplaceItem[] = data.map(b => ({
+                    id: b.id,
+                    venueName: b.court?.venue?.name || "Unknown Venue",
+                    venueImage: b.court?.venue?.image,
+                    courtName: b.court?.name || "Unknown Court",
+                    date: b.date,
+                    time: `${b.start_time.slice(0, 5)} - ${b.end_time.slice(0, 5)}`,
+                    price: Number(b.total_price),
+                    transferPrice: Number(b.transfer_price),
+                    transferNote: b.transfer_note,
+                    status: b.transfer_status
+                }));
+                setListings(mapped);
+            })
+            .catch(err => console.error(err))
+            .finally(() => setLoading(false));
+    }, []);
+
+    const handlePurchase = async (id: number) => {
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+            alert("Please login to purchase");
+            return;
+        }
+
+        if (!confirm("Are you sure you want to purchase this transfer?")) return;
+
+        try {
+            const res = await fetch(`http://localhost:8000/api/marketplace/${id}/purchase`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (res.ok) {
+                alert("Purchase successful! Check My Bookings.");
+                // Remove from list
+                setListings(prev => prev.filter(item => item.id !== id));
+            } else {
+                const err = await res.json();
+                alert(err.message || "Purchase failed");
+            }
+        } catch (e) {
+            alert("Error purchasing");
+        }
     };
 
-    return (
-        <div className="h-full bg-gray-50 flex flex-col">
-            {/* Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4 flex-none">
-                <h1 className="text-2xl font-bold text-gray-900">Marketplace</h1>
-                <p className="text-sm text-gray-500">Find and book transferred slots from other users.</p>
-            </div>
+    const filteredListings = listings.filter(item => {
+        if (activeFilter === "all") return true;
+        // Filter logic if needed
+        return true;
+    });
 
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6">
-                <div className="max-w-5xl mx-auto space-y-4">
-                    {availableBookings.map(booking => (
-                        <Link
-                            key={booking.id}
-                            href={`/marketplace/${booking.id}`}
-                            className="block bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col md:flex-row transition-shadow hover:shadow-md cursor-pointer group"
-                        >
-                            {/* Image */}
-                            <div className="md:w-48 h-32 md:h-auto relative bg-gray-200">
-                                {booking.venueImage ? (
-                                    <Image
-                                        src={booking.venueImage}
-                                        alt={booking.venueName}
-                                        fill
-                                        className="object-cover group-hover:scale-105 transition-transform duration-300"
-                                    />
-                                ) : (
-                                    <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                                        <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                        </svg>
+    if (loading) {
+        return (
+            <div className="flex h-full items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="h-full bg-gray-50 p-6 overflow-y-auto w-full">
+            <div className="max-w-6xl mx-auto">
+
+                {/* Header */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900">Marketplace</h1>
+                        <p className="text-gray-500 text-sm mt-1">Find and buy transferred bookings from other players.</p>
+                    </div>
+
+                    {/* Filters */}
+                    <div className="flex gap-2 bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
+                        {["all", "badminton", "football", "tennis"].map(type => (
+                            <button
+                                key={type}
+                                onClick={() => setActiveFilter(type)}
+                                className={`
+                            px-4 py-1.5 rounded-md text-sm font-medium capitalize transition-all
+                            ${activeFilter === type
+                                        ? "bg-gray-900 text-white shadow-sm"
+                                        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                                    }
+                        `}
+                            >
+                                {type}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Listings Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredListings.map(item => (
+                        <div key={item.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow group">
+                            <div className="h-40 bg-gray-200 relative overflow-hidden">
+                                {/* Image */}
+                                <div className="absolute inset-0 flex items-center justify-center text-gray-400 bg-gray-100">
+                                    <span className="text-3xl">🎫</span>
+                                </div>
+                                {item.transferPrice < item.price && (
+                                    <div className="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded shadow-sm">
+                                        Save {Math.round(((item.price - item.transferPrice) / item.price) * 100)}%
                                     </div>
                                 )}
                             </div>
 
-                            {/* Details */}
-                            <div className="p-5 flex-1 flex flex-col justify-between">
+                            <div className="p-5">
                                 <div className="flex justify-between items-start mb-2">
+                                    <h3 className="font-bold text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors">{item.venueName}</h3>
+                                </div>
+
+                                <div className="text-sm text-gray-600 space-y-1 mb-4">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium">{item.courtName}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span>📅 {item.date}</span>
+                                        <span>⏰ {item.time}</span>
+                                    </div>
+                                </div>
+
+                                {item.transferNote && (
+                                    <div className="bg-blue-50 text-blue-700 text-xs p-3 rounded-lg mb-4 italic">
+                                        "{item.transferNote}"
+                                    </div>
+                                )}
+
+                                <div className="flex items-center justify-between pt-4 border-t border-gray-100">
                                     <div>
-                                        <h3 className="font-bold text-lg text-gray-900 group-hover:text-blue-600 transition-colors">{booking.venueName}</h3>
-                                        <p className="text-gray-500 text-sm">{booking.courtName} • {booking.date}</p>
-                                        {booking.transferNote && (
-                                            <div className="mt-2 text-sm text-gray-600 bg-gray-50 px-2 py-1 rounded border border-gray-100 inline-block font-style-italic">
-                                                "{booking.transferNote}"
-                                            </div>
-                                        )}
-                                    </div>
-                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-blue-100 text-blue-700 border-blue-200">
-                                        Available
-                                    </span>
-                                </div>
-
-                                <div className="flex justify-between items-end mt-4">
-                                    <div className="flex items-center text-gray-700 text-sm">
-                                        <svg className="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        {booking.time}
-                                    </div>
-                                    <div className="flex flex-col items-end">
-                                        <div className="font-bold text-gray-900 text-lg">
-                                            {formatCurrency(booking.transferPrice || booking.price)}
+                                        <div className="text-xs text-gray-400 line-through">
+                                            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(item.price)}
                                         </div>
-                                        {booking.transferPrice && booking.transferPrice < booking.price && (
-                                            <span className="text-xs text-gray-400 line-through">
-                                                {formatCurrency(booking.price)}
-                                            </span>
-                                        )}
+                                        <div className="text-lg font-bold text-gray-900">
+                                            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(item.transferPrice)}
+                                        </div>
                                     </div>
+                                    <button
+                                        onClick={() => handlePurchase(item.id)}
+                                        className="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition shadow-sm active:scale-95"
+                                    >
+                                        Buy Now
+                                    </button>
                                 </div>
                             </div>
-                        </Link>
-                    ))}
-
-                    {availableBookings.length === 0 && (
-                        <div className="text-center py-10">
-                            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400">
-                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                                </svg>
-                            </div>
-                            <h3 className="text-lg font-medium text-gray-900">No bookings available</h3>
-                            <p className="text-gray-500">There are no bookings listed for transfer right now.</p>
                         </div>
-                    )}
+                    ))}
                 </div>
+
+                {filteredListings.length === 0 && (
+                    <div className="text-center py-16">
+                        <div className="text-4xl mb-4">🛒</div>
+                        <h3 className="text-lg font-bold text-gray-900">No Listings Available</h3>
+                        <p className="text-gray-500">Check back later for transferred bookings.</p>
+                    </div>
+                )}
+
             </div>
         </div>
     );

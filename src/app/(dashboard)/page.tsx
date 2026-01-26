@@ -99,7 +99,7 @@ export default function DashboardPage() {
                 {sortedVenues.map((venue) => (
                     <Link
                         key={venue.id}
-                        href={`/map/${venue.id}`} // Link to detail page
+                        href={`/booking/${venue.id}`} // Link to detail page
                         className="group flex flex-col bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-lg transition-all hover:-translate-y-1"
                     >
                         <div className="h-48 bg-gray-200 relative">
