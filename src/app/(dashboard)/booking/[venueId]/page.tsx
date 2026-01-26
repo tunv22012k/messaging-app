@@ -98,6 +98,26 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
             .catch(err => console.error("Failed to fetch bookings", err));
     }, [venueId, bookingDate]);
 
+    // Pending slots from other users
+    const [pendingSlots, setPendingSlots] = useState<{ court_id: number; start_time: string; end_time: string }[]>([]);
+
+    // Fetch Pending Slots
+    useEffect(() => {
+        if (!venueId) return;
+
+        const fetchPendingSlots = () => {
+            fetch(`http://localhost:8000/api/venues/${venueId}/pending-slots?date=${bookingDate}`)
+                .then(res => res.json())
+                .then(data => setPendingSlots(data))
+                .catch(err => console.error("Failed to fetch pending slots", err));
+        };
+
+        fetchPendingSlots();
+        // Refresh every 10 seconds
+        const interval = setInterval(fetchPendingSlots, 10000);
+        return () => clearInterval(interval);
+    }, [venueId, bookingDate]);
+
     // Generate Available Slots Logic
     const availableSlots = useMemo(() => {
         if (!venue || !selectedCourtId) return [];
@@ -124,6 +144,21 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                 return bStart < slotEnd && bEnd > slotStart;
             });
 
+            // Check if slot is pending by another user
+            const isPending = pendingSlots.some(p => {
+                if (String(p.court_id) !== selectedCourtId) return false;
+
+                const [ph, pm] = String(p.start_time).split(':').map(Number);
+                const [peh, pem] = String(p.end_time).split(':').map(Number);
+                const pStart = ph * 60 + pm;
+                const pEnd = peh * 60 + pem;
+
+                const slotStart = hour * 60;
+                const slotEnd = (hour + 1) * 60;
+
+                return pStart < slotEnd && pEnd > slotStart;
+            });
+
             const price = parseInt(venue.price_info.replace(/\D/g, '')) || 100000;
 
             slots.push({
@@ -132,11 +167,13 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                 startTime,
                 endTime,
                 price,
-                isBooked
+                isBooked,
+                isPending
             });
         }
         return slots;
-    }, [venue, selectedCourtId, bookings]);
+    }, [venue, selectedCourtId, bookings, pendingSlots]);
+
 
 
     const handleSlotToggle = (slotId: string) => {
@@ -178,46 +215,51 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
             return;
         }
 
+        // For now, we only support booking one slot at a time for the payment flow
+        if (selectedSlotIds.length > 1) {
+            alert("Vui lòng chọn một khung giờ duy nhất để tiến hành thanh toán.");
+            return;
+        }
+
         const token = localStorage.getItem('auth_token');
         if (!token) {
             alert("Vui lòng đăng nhập để đặt sân.");
             return;
         }
 
-        setIsBooked(false);
-
         try {
-            for (const slotId of selectedSlotIds) {
-                const slot = availableSlots.find(s => s.id === slotId);
-                if (!slot) continue;
-
-                const res = await fetch('http://localhost:8000/api/bookings', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: JSON.stringify({
-                        court_id: slot.courtId,
-                        date: bookingDate,
-                        start_time: slot.startTime,
-                        end_time: slot.endTime,
-                        total_price: slot.price
-                    })
-                });
-
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.message || 'Đặt sân thất bại');
-                }
+            const slotId = selectedSlotIds[0];
+            const slot = availableSlots.find(s => s.id === slotId);
+            if (!slot) {
+                alert("Không tìm thấy thông tin khung giờ.");
+                return;
             }
 
-            setIsBooked(true);
-            fetch(`http://localhost:8000/api/venues/${venueId}/bookings?date=${bookingDate}`)
-                .then(res => res.json())
-                .then(data => setBookings(data));
+            // Call initiate API to create pending booking
+            const res = await fetch('http://localhost:8000/api/bookings/initiate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    court_id: slot.courtId,
+                    date: bookingDate,
+                    start_time: slot.startTime,
+                    end_time: slot.endTime,
+                    total_price: totalPrice // includes extras
+                })
+            });
 
-            setSelectedSlotIds([]);
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.message || 'Đặt sân thất bại');
+            }
+
+            const data = await res.json();
+
+            // Redirect to payment page
+            router.push(`/booking/${venueId}/payment?bookingId=${data.booking.id}`);
 
         } catch (err: any) {
             alert(`Đặt sân thất bại: ${err.message}`);
@@ -600,7 +642,7 @@ interface BookingCardProps {
     setBookingDate: (date: string) => void;
     selectedCourtId: string;
     setSelectedCourtId: (id: string) => void;
-    availableSlots: { id: string; courtId: string; startTime: string; endTime: string; price: number; isBooked: boolean }[];
+    availableSlots: { id: string; courtId: string; startTime: string; endTime: string; price: number; isBooked: boolean; isPending?: boolean }[];
     selectedSlotIds: string[];
     handleSlotToggle: (slotId: string) => void;
     selectedExtraIds: string[];
@@ -737,7 +779,7 @@ function BookingCard({
                     <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
                         {availableSlots.map(slot => {
                             const isPast = isSlotPast(bookingDate, slot.startTime);
-                            const isDisabled = slot.isBooked || isPast;
+                            const isDisabled = slot.isBooked || slot.isPending || isPast;
                             const isSelected = selectedSlotIds.includes(slot.id);
 
                             return (
@@ -750,18 +792,20 @@ function BookingCard({
                                         relative text-sm py-3 px-3 rounded-xl border-2 transition-all text-center group
                                         ${isDisabled
                                             ? slot.isBooked
-                                                ? 'bg-rose-50 text-rose-300 border-rose-100 cursor-not-allowed'
-                                                : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
+                                                ? 'bg-rose-50 text-rose-400 border-rose-200 cursor-not-allowed'
+                                                : slot.isPending
+                                                    ? 'bg-yellow-100 text-yellow-700 border-yellow-400 cursor-not-allowed'
+                                                    : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
                                             : isSelected
                                                 ? 'bg-gradient-to-r from-indigo-600 to-purple-600 border-transparent text-white shadow-lg shadow-indigo-200'
                                                 : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-400 hover:shadow-md'
                                         }
                                     `}
                                 >
-                                    <div className="font-bold text-xs">{slot.startTime} - {slot.endTime}</div>
-                                    <div className={`text-[11px] mt-1 ${isSelected ? 'text-indigo-200' : 'text-slate-400 group-hover:text-indigo-500'}`}>
+                                    <div className={`font-bold text-xs ${slot.isPending ? 'text-yellow-800' : ''}`}>{slot.startTime} - {slot.endTime}</div>
+                                    <div className={`text-[11px] mt-1 ${isSelected ? 'text-indigo-200' : slot.isPending ? 'text-yellow-600 font-medium' : 'text-slate-400 group-hover:text-indigo-500'}`}>
                                         {isDisabled
-                                            ? (slot.isBooked ? 'Đã đặt' : 'Hết hạn')
+                                            ? (slot.isBooked ? 'Đã đặt' : slot.isPending ? 'Có người đang đặt' : 'Hết hạn')
                                             : formatCurrency(slot.price)}
                                     </div>
                                 </button>
@@ -781,14 +825,14 @@ function BookingCard({
                                 <label
                                     key={extra.id}
                                     className={`flex items-center justify-between p-4 border-2 rounded-xl cursor-pointer transition-all ${selectedExtraIds.includes(String(extra.id))
-                                            ? 'border-indigo-400 bg-indigo-50/50'
-                                            : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'
+                                        ? 'border-indigo-400 bg-indigo-50/50'
+                                        : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'
                                         }`}
                                 >
                                     <div className="flex items-center gap-3">
                                         <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${selectedExtraIds.includes(String(extra.id))
-                                                ? 'bg-indigo-600 border-indigo-600'
-                                                : 'border-slate-300'
+                                            ? 'bg-indigo-600 border-indigo-600'
+                                            : 'border-slate-300'
                                             }`}>
                                             {selectedExtraIds.includes(String(extra.id)) && (
                                                 <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
