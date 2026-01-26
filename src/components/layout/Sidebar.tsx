@@ -83,7 +83,7 @@ export default function Sidebar() {
         channel.listen('.UserReceivedMessage', (e: any) => {
             // e.message is the new message
             const newMessage = e.message;
-            const messageText = newMessage.text || (newMessage.type === 'image' ? 'Sent an image' : 'Sent a message');
+            const messageText = newMessage.text || (newMessage.type === 'image' ? '[Hình ảnh]' : (newMessage.type === 'video' ? '[Video]' : 'Tin nhắn mới'));
 
             const sender = newMessage.sender;
             // Resolve sender UID: Prefer google_id if available (matches sidebar logic)

@@ -6,14 +6,14 @@ import { useState, useRef, useEffect } from "react";
 
 export default function MessageBubble({
     message,
-    onImageClick,
+    onMediaClick,
     showAvatar,
     avatarUrl,
     onReaction,
     isMe: propsIsMe
 }: {
     message: Message;
-    onImageClick?: (url: string) => void;
+    onMediaClick?: (src: string, type: 'image' | 'video', mimeType?: string) => void;
     showAvatar?: boolean;
     avatarUrl?: string;
     onReaction?: (messageId: string, emoji: string) => void;
@@ -60,9 +60,9 @@ export default function MessageBubble({
                         <img
                             src={imageUrl}
                             alt="Sent image"
-                            className="w-full h-auto max-w-full rounded-lg cursor-pointer object-cover"
+                            className="w-full h-auto max-w-full rounded-lg cursor-pointer object-cover hover:opacity-90 transition-opacity"
                             referrerPolicy="no-referrer"
-                            onClick={() => imageUrl && onImageClick?.(imageUrl)}
+                            onClick={() => imageUrl && onMediaClick?.(imageUrl, 'image')}
                         />
                         {message.text && <p className="mt-1 whitespace-pre-wrap">{message.text}</p>}
                     </div>
@@ -70,10 +70,24 @@ export default function MessageBubble({
             case "video":
                 return (
                     <div>
-                        <video controls className="max-w-xs rounded-lg">
-                            <source src={message.media?.viewLink} type={message.media?.mimeType} />
-                            Your browser does not support the video tag.
-                        </video>
+                        <div
+                            className="relative max-w-xs rounded-lg overflow-hidden cursor-pointer group"
+                            onClick={() => message.media?.viewLink && onMediaClick?.(message.media.viewLink, 'video', message.media?.mimeType)}
+                        >
+                            <video className="w-full h-full object-cover">
+                                <source src={message.media?.viewLink} type={message.media?.mimeType} />
+                                Your browser does not support the video tag.
+                            </video>
+
+                            {/* Play Overlay */}
+                            <div className="absolute inset-0 bg-black/20 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                                <div className="w-12 h-12 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white group-hover:scale-110 transition-transform">
+                                    <svg className="w-6 h-6 translate-x-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
                         {message.text && <p className="mt-1 whitespace-pre-wrap">{message.text}</p>}
                     </div>
                 );
@@ -159,7 +173,7 @@ export default function MessageBubble({
                         ref={pickerRef}
                         className={clsx(
                             "absolute flex gap-1 bg-white rounded-full shadow-xl border border-gray-100 p-1.5 z-50 animate-in fade-in zoom-in duration-200",
-                            isOwn ? "bottom-full right-0 mb-2" : "bottom-full left-0 mb-2"
+                            isOwn ? "top-full right-0 mt-2" : "top-full left-0 mt-2"
                         )}
                         style={{ minWidth: "max-content" }}
                     >

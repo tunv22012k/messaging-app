@@ -9,7 +9,7 @@ import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 import TypingIndicator from "./TypingIndicator";
 import Link from "next/link";
-import ImageModal from "@/components/ui/ImageModal";
+import MediaModal from "@/components/ui/MediaModal";
 import echo from "@/lib/echo";
 import { usePresence } from "@/hooks/usePresence";
 
@@ -48,6 +48,12 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
     const [recipient, setRecipient] = useState<any>(null);
     const { isUserOnline } = usePresence();
     const isRecipientOnline = recipient ? isUserOnline(recipient.uid || recipient.google_id || String(recipient.id)) : false;
+
+    const [selectedMedia, setSelectedMedia] = useState<{ src: string, type: 'image' | 'video', mimeType?: string } | null>(null);
+
+    const handleMediaClick = (src: string, type: 'image' | 'video', mimeType?: string) => {
+        setSelectedMedia({ src, type, mimeType });
+    };
 
     // Fetch Recipient Details
     useEffect(() => {
@@ -415,10 +421,77 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
     };
 
     const sendMedia = async (mediaData: any) => {
-        alert("Media sending not yet implemented in backend API");
+        if (!user || !chatId) return;
+
+        const token = localStorage.getItem('auth_token');
+        const socketId = echo?.connector?.pusher?.connection?.socket_id;
+        const type = mediaData.mimeType?.startsWith('video/') ? 'video' : 'image';
+
+        try {
+            const res = await fetch(`http://localhost:8000/api/chats/${chatId}/messages`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/json',
+                    ...(socketId ? { 'X-Socket-ID': socketId } : {})
+                },
+                body: JSON.stringify({
+                    text: "", // Optional caption could be added later
+                    type: type,
+                    media: mediaData
+                })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                setMessages(prev => {
+                    const newMsg = {
+                        ...data.message,
+                        createdAt: new Date(data.message.created_at).getTime(),
+                        id: String(data.message.id),
+                        senderId: String(data.message.sender_id),
+                        sender: data.message.sender ? {
+                            uid: data.message.sender.google_id || String(data.message.sender.id),
+                            displayName: data.message.sender.name,
+                            email: data.message.sender.email,
+                            avatar: data.message.sender.avatar,
+                            createdAt: new Date(data.message.sender.created_at).getTime(),
+                        } : undefined,
+                    };
+                    if (prev.find(m => String(m.id) === String(newMsg.id))) return prev;
+                    return [...prev, newMsg];
+                });
+
+                // Always scroll to bottom for sender
+                setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+            }
+        } catch (error) {
+            console.error("Failed to send media", error);
+            alert("Failed to send media");
+        }
     };
 
-    if (loading) return <div className="flex h-full items-center justify-center">Loading chat...</div>;
+    if (loading) return (
+        <div className="flex h-full items-center justify-center bg-gray-50">
+            <div className="flex flex-col items-center gap-4">
+                {/* Chat bubble spinner */}
+                <div className="relative">
+                    <div className="w-14 h-14 rounded-full border-4 border-gray-200"></div>
+                    <div
+                        className="absolute inset-0 w-14 h-14 rounded-full border-4 border-transparent border-t-blue-500 border-r-indigo-500 animate-spin"
+                        style={{ animationDuration: '0.8s' }}
+                    ></div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        <svg className="w-6 h-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                    </div>
+                </div>
+                <p className="text-gray-500 font-medium">Đang tải cuộc trò chuyện...</p>
+            </div>
+        </div>
+    );
 
     return (
         <div className="flex h-full flex-col bg-gray-50">
@@ -554,8 +627,8 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
                                             isMe={isMe}
                                             avatarUrl={avatarUrl}
                                             onReaction={handleReaction}
+                                            onMediaClick={handleMediaClick}
                                         />
-                                        {/* Seen Indicator */}
                                         {isMe && msg.id === lastReadMessageId && (
                                             <div className="flex items-center gap-1 mt-1 mr-1">
                                                 <img
@@ -577,6 +650,17 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
 
             <ChatInput onSendMessage={sendMessage} onSendMedia={sendMedia} />
 
-        </div>
+            {/* Media Viewer Modal */}
+            {selectedMedia && (
+                <MediaModal
+                    isOpen={!!selectedMedia}
+                    onClose={() => setSelectedMedia(null)}
+                    src={selectedMedia.src}
+                    type={selectedMedia.type}
+                    mimeType={selectedMedia.mimeType}
+                />
+            )}
+
+        </div >
     );
 }
