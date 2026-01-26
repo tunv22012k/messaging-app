@@ -296,7 +296,7 @@ export default function Sidebar() {
 
             return <span className={textClass}>{prefix}{lastMsg}</span>;
         }
-        return <span className={isActive ? "text-white/70 italic" : "text-gray-400 italic"}>Start a conversation</span>;
+        return <span className={isActive ? "text-white/70 italic" : "text-gray-400 italic"}>Bắt đầu trò chuyện</span>;
     };
 
     return (
@@ -304,7 +304,7 @@ export default function Sidebar() {
             <div className="flex flex-col gap-4 p-4 pb-2 border-b border-gray-100">
                 <div className="flex items-center justify-between">
                     <h2 className="text-2xl font-bold tracking-tight text-gray-900">
-                        Messages
+                        Tin nhắn
                         <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-600">
                             {users.length}
                         </span>
@@ -320,7 +320,7 @@ export default function Sidebar() {
                     </div>
                     <input
                         type="text"
-                        placeholder="Search users..."
+                        placeholder="Tìm kiếm người dùng..."
                         className="block w-full rounded-2xl border-0 bg-gray-100 py-2.5 pl-10 pr-4 text-sm text-gray-900 ring-0 transition-all placeholder:text-gray-500 focus:bg-white focus:ring-2 focus:ring-blue-500/20"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
@@ -331,7 +331,7 @@ export default function Sidebar() {
             <div className="flex-1 overflow-y-auto px-3 py-2 custom-scrollbar">
                 {filteredUsers.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-center opacity-50">
-                        <p className="text-sm">No users found</p>
+                        <p className="text-sm">Không tìm thấy người dùng</p>
                     </div>
                 ) : (
                     <div className="space-y-1">

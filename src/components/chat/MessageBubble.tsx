@@ -59,7 +59,7 @@ export default function MessageBubble({
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                             src={imageUrl}
-                            alt="Sent image"
+                            alt="Ảnh đã gửi"
                             className="w-full h-auto max-w-full rounded-lg cursor-pointer object-cover hover:opacity-90 transition-opacity"
                             referrerPolicy="no-referrer"
                             onClick={() => imageUrl && onMediaClick?.(imageUrl, 'image')}
@@ -76,7 +76,7 @@ export default function MessageBubble({
                         >
                             <video className="w-full h-full object-cover">
                                 <source src={message.media?.viewLink} type={message.media?.mimeType} />
-                                Your browser does not support the video tag.
+                                Trình duyệt của bạn không hỗ trợ thẻ video.
                             </video>
 
                             {/* Play Overlay */}

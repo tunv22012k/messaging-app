@@ -497,7 +497,9 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
         <div className="flex h-full flex-col bg-gray-50">
             <div className="border-b bg-white p-4 shadow-sm flex items-center gap-3">
                 <Link href="/chat" className="md:hidden p-2 -ml-2 text-gray-600 hover:text-gray-900">
-                    Back
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
                 </Link>
                 {recipient ? (
                     <div className="flex items-center gap-3">
@@ -532,7 +534,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
                         </div>
                     </div>
                 ) : (
-                    <h2 className="font-semibold text-gray-800">Chat</h2>
+                    <h2 className="font-semibold text-gray-800">Tin nhắn</h2>
                 )}
             </div>
 
@@ -542,7 +544,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
                 onScroll={handleScroll}
             >
                 {loadingMore && (
-                    <div className="text-center py-2 text-xs text-gray-500">Loading more...</div>
+                    <div className="text-center py-2 text-xs text-gray-500">Đang tải thêm...</div>
                 )}
 
                 {(() => {
@@ -634,8 +636,8 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
                                                 <img
                                                     src={recipient?.avatar || `https://ui-avatars.com/api/?name=${recipient?.name}`}
                                                     className="w-3.5 h-3.5 rounded-full border border-white opacity-90"
-                                                    alt="Seen"
-                                                    title={`Seen at ${msg.readAt ? new Date(msg.readAt).toLocaleTimeString() : ''}`}
+                                                    alt="Đã xem"
+                                                    title={`Đã xem lúc ${msg.readAt ? new Date(msg.readAt).toLocaleTimeString() : ''}`}
                                                 />
                                             </div>
                                         )}

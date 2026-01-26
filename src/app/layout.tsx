@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google"; // Using Inter as a default, or I can use Geist if provided
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
-import PresenceManager from "@/components/PresenceManager";
+import { PresenceProvider } from "@/context/PresenceContext";
+import { NotificationProvider } from "@/context/NotificationContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,8 +21,11 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className} suppressHydrationWarning={true}>
         <AuthProvider>
-          <PresenceManager />
-          {children}
+          <PresenceProvider>
+            <NotificationProvider>
+              {children}
+            </NotificationProvider>
+          </PresenceProvider>
         </AuthProvider>
       </body>
     </html>

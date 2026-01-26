@@ -3,127 +3,38 @@
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter, usePathname } from "next/navigation";
-
-import { useEffect, useState } from "react";
-import echo from "@/lib/echo";
+import { useNotification } from "@/context/NotificationContext";
 
 export default function Header() {
     const { user, logout } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
-    const [unreadCount, setUnreadCount] = useState(0);
-
-    // Fetch unread count
-    const fetchUnreadCount = async () => {
-        if (!user) return;
-        try {
-            const token = localStorage.getItem('auth_token');
-            const res = await fetch('http://localhost:8000/api/messages/unread-count', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setUnreadCount(data.count);
-            }
-        } catch (error) {
-            console.error("Failed to fetch unread count", error);
-        }
-    };
-
-    // Initial fetch - separate effect
-    useEffect(() => {
-        if (!user) return;
-        fetchUnreadCount();
-    }, [user]);
-
-    // WebSocket subscription - only on client side
-    useEffect(() => {
-        if (!user) return;
-
-        // Ensure we're on client side and echo is available
-        if (typeof window === 'undefined' || !echo) {
-            console.log("[Header] Echo not available yet");
-            return;
-        }
-
-        // Delay subscription slightly to ensure Echo is fully connected
-        const subscriptionTimeout = setTimeout(() => {
-            // Ensure Echo is authenticated for private channel
-            const token = localStorage.getItem('auth_token');
-            if (token && echo.connector) {
-                echo.connector.options.auth.headers['Authorization'] = `Bearer ${token}`;
-            }
-
-            // Listen for real-time messages
-            // We use the same channel as Sidebar: App.Models.User.{id}
-            const channelName = `App.Models.User.${user.uid}`; // uid is usually google_id or id
-            console.log("[Header] Subscribing to channel:", channelName);
-
-            const channel = echo.private(channelName);
-
-            const handleMessage = (e: any) => {
-                console.log("[Header] Received UserReceivedMessage:", e);
-                const msg = e.message;
-                if (msg) {
-                    // Check if message is from me
-                    const isFromMe = String(msg.sender_id) === String(user.id);
-
-                    if (!isFromMe) {
-                        console.log("[Header] Incrementing unread count");
-                        setUnreadCount(prev => prev + 1);
-                    }
-                }
-            };
-
-            channel.listen('.UserReceivedMessage', handleMessage);
-
-            // Store cleanup function
-            (window as any).__headerChannelCleanup = () => {
-                console.log("[Header] Cleaning up channel subscription");
-                channel.stopListening('.UserReceivedMessage');
-            };
-        }, 500); // Wait 500ms for Echo to be fully ready
-
-        // Listen for local event to refresh (when user reads messages)
-        const handleRefresh = () => {
-            console.log("[Header] Refreshing unread count");
-            fetchUnreadCount();
-        };
-        window.addEventListener('REFRESH_UNREAD_COUNT', handleRefresh);
-
-        return () => {
-            clearTimeout(subscriptionTimeout);
-            if ((window as any).__headerChannelCleanup) {
-                (window as any).__headerChannelCleanup();
-            }
-            window.removeEventListener('REFRESH_UNREAD_COUNT', handleRefresh);
-        };
-    }, [user]);
+    const { unreadCount } = useNotification();
 
     const navItems = [
         {
-            name: 'Map', href: '/map', icon: (
+            name: 'Bản đồ', href: '/map', icon: (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                 </svg>
             )
         },
         {
-            name: 'Bookings', href: '/my-bookings', icon: (
+            name: 'Lịch đặt', href: '/my-bookings', icon: (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
             )
         },
         {
-            name: 'Market', href: '/marketplace', icon: (
+            name: 'Nhượng sân', href: '/marketplace', icon: (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
                 </svg>
             )
         },
         {
-            name: 'Chat', href: '/chat', icon: (
+            name: 'Tin nhắn', href: '/chat', icon: (
                 <div className="relative">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
@@ -137,7 +48,7 @@ export default function Header() {
             )
         },
         {
-            name: 'People', href: '/people', icon: (
+            name: 'Cộng đồng', href: '/people', icon: (
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>

@@ -167,7 +167,7 @@ export default function ChatInput({ onSendMessage, onSendMedia, onTyping, disabl
                 disabled={disabled || uploading}
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded-full p-2 mb-1 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
-                title="Upload Media"
+                title="Gửi ảnh/video"
             >
                 {uploading ? (
                     <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-500 border-t-transparent"></div>
@@ -184,7 +184,7 @@ export default function ChatInput({ onSendMessage, onSendMedia, onTyping, disabl
                     value={text}
                     onChange={handleChange}
                     onKeyDown={handleKeyDown}
-                    placeholder="Type a message..."
+                    placeholder="Nhập tin nhắn..."
                     disabled={disabled || uploading}
                     rows={1}
                     className="w-full bg-transparent px-4 py-3 pr-10 focus:outline-none disabled:opacity-50 resize-none overflow-y-auto block max-h-[80px] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-400"
@@ -196,7 +196,7 @@ export default function ChatInput({ onSendMessage, onSendMedia, onTyping, disabl
                     type="button"
                     className="absolute right-2 bottom-1.5 rounded-full p-1 text-gray-500 hover:text-yellow-500 transition-colors"
                     onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    title="Insert Emoji"
+                    title="Chèn biểu cảm"
                 >
                     <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

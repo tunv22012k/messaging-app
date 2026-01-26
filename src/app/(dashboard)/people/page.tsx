@@ -31,7 +31,7 @@ export default function PeoplePage() {
             setDebouncedSearch(searchQuery);
             setCurrentPage(1); // Reset to first page on new search
             setUsers([]); // Clear users for new search
-        }, 300);
+        }, 500);
         return () => clearTimeout(timer);
     }, [searchQuery]);
 

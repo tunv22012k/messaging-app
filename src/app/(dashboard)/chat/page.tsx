@@ -7,9 +7,9 @@ export default function ChatPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                     </svg>
                 </div>
-                <h2 className="mb-2 text-2xl font-bold text-gray-900">Select a Conversation</h2>
+                <h2 className="mb-2 text-2xl font-bold text-gray-900">Chọn cuộc trò chuyện</h2>
                 <p className="text-gray-500">
-                    Choose a contact from the sidebar to start messaging or create a new chat.
+                    Chọn một liên hệ từ danh sách bên trái để bắt đầu nhắn tin.
                 </p>
             </div>
         </div>
