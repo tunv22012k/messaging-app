@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { User } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
@@ -26,30 +26,66 @@ export default function Sidebar() {
         activeChatIdRef.current = activeChatId;
     }, [activeChatId]);
 
-    const [searchQuery, setSearchQuery] = useState("");
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [loading, setLoading] = useState(false);
+    const observer = useRef<IntersectionObserver | null>(null);
+    const lastUserElementRef = useCallback((node: HTMLDivElement) => {
+        if (loading) return;
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting && hasMore) {
+                setPage(prevPage => prevPage + 1);
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [loading, hasMore]);
 
-    const filteredUsers = users.filter(u => {
-        if (!user) return false;
-        const matchesSearch = u.displayName?.toLowerCase().includes(searchQuery.toLowerCase());
-        // Show all users for now as we don't have connections implemented in backend fully
-        return matchesSearch;
-    });
+    const [searchQuery, setSearchQuery] = useState("");
+    const [debouncedSearch, setDebouncedSearch] = useState("");
+
+    // Debounce search
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearch(searchQuery);
+            setPage(1); // Reset page when search changes
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    // Use server-side filtered users directly
+    const filteredUsers = users;
 
     console.log("[Sidebar] Render - Users:", users.map(u => ({ uid: u.uid, lastMessage: u.lastMessage })));
 
-    // 1. Fetch Users
+    // 1. Fetch Users (Paginated)
     useEffect(() => {
         if (!user) return;
+
+        // Prevent fetching if already loading or no more (unless it's page 1 which is reset or init)
+        if (loading) return;
+
+        setLoading(true);
         const token = localStorage.getItem('auth_token');
 
-        fetch('http://localhost:8000/api/chats', {
+        // Append page and search parameters
+        let url = `http://localhost:8000/api/chats?page=${page}`;
+        if (debouncedSearch) {
+            url += `&search=${encodeURIComponent(debouncedSearch)}`;
+        }
+
+        fetch(url, {
             headers: { 'Authorization': `Bearer ${token}` }
         })
             .then(res => res.json())
-            .then(data => {
-                const mappedUsers = data.map((u: any) => ({
+            .then((response: any) => {
+                // Check if response is paginated (has data property)
+                const isPaginated = Array.isArray(response.data);
+                const rawUsers = isPaginated ? response.data : response;
+
+                const mappedUsers = rawUsers.map((u: any) => ({
                     uid: u.google_id || String(u.id),
-                    id: u.id, // Store original numeric ID for fallback matching
+                    id: u.id,
                     displayName: u.name,
                     email: u.email,
                     avatar: u.avatar,
@@ -57,14 +93,30 @@ export default function Sidebar() {
                     lastSeen: new Date(u.updated_at).getTime(),
                     lastMessage: u.last_message,
                     lastMessageSenderId: u.last_message_sender_id,
-                    lastMessageReadAt: u.last_message_read_at, // Map read status from API
+                    lastMessageReadAt: u.last_message_read_at,
                     connections: [],
                 }));
-                setUsers(mappedUsers);
-            })
-            .catch(err => console.error("Failed to fetch users", err));
 
-    }, [user]);
+                setUsers(prev => {
+                    // If page 1, replace. Else append.
+                    if (page === 1) return mappedUsers;
+
+                    // Filter out duplicates (just in case)
+                    const existingIds = new Set(prev.map(u => u.uid));
+                    const newUsers = mappedUsers.filter((u: any) => !existingIds.has(u.uid));
+                    return [...prev, ...newUsers];
+                });
+
+                if (isPaginated) {
+                    setHasMore(response.current_page < response.last_page);
+                } else {
+                    setHasMore(false); // If backend returns simple array, assume no more pages
+                }
+            })
+            .catch(err => console.error("Failed to fetch users", err))
+            .finally(() => setLoading(false));
+
+    }, [user, page, debouncedSearch]); // Re-fetch when page or search changes
 
     // Listen for new messages globally to update Sidebar list
     useEffect(() => {
@@ -329,54 +381,75 @@ export default function Sidebar() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-3 py-2 custom-scrollbar">
-                {filteredUsers.length === 0 ? (
+                {loading && page === 1 ? (
+                    <div className="space-y-1">
+                        {[1, 2, 3, 4, 5].map((i) => (
+                            <div key={i} className="flex w-full items-center gap-3 rounded-2xl p-3">
+                                <div className="h-12 w-12 flex-none rounded-full bg-gray-100 animate-pulse" />
+                                <div className="flex-1 space-y-2">
+                                    <div className="h-4 w-24 rounded bg-gray-100 animate-pulse" />
+                                    <div className="h-3 w-32 rounded bg-gray-100 animate-pulse" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : filteredUsers.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 text-center opacity-50">
                         <p className="text-sm">Không tìm thấy người dùng</p>
                     </div>
                 ) : (
                     <div className="space-y-1">
-                        {filteredUsers.map((u) => {
+                        {filteredUsers.map((u, index) => {
                             const chatId = [user?.uid, u.uid].sort().join("_");
                             const isActive = activeChatId === chatId;
 
                             console.log(`[Sidebar] Rendering row [${u.uid}] msg: ${u.lastMessage}`);
-                            return (
-                                <button
-                                    key={`${u.uid}-${u.lastMessage}`} // Force re-render on message change
-                                    onClick={() => createChat(u)}
-                                    className={`group relative flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-all duration-200 
-                                        ${isActive
-                                            ? "bg-blue-500 shadow-md shadow-blue-500/20"
-                                            : "hover:bg-gray-100"
-                                        }`}
-                                >
-                                    <div className="relative flex-none">
-                                        <div className={`rounded-full p-0.5 ${isActive ? 'bg-white/20' : 'bg-transparent'}`}>
-                                            <img
-                                                src={u.avatar || `https://ui-avatars.com/api/?name=${u.displayName}`}
-                                                alt={u.displayName || "User"}
-                                                className="h-12 w-12 rounded-full object-cover bg-gray-200"
-                                            />
-                                        </div>
-                                        {getStatusIndicator(u)}
-                                    </div>
+                            const isLastUser = index === filteredUsers.length - 1;
 
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex justify-between items-baseline mb-0.5">
-                                            <p className={`truncate text-sm font-semibold ${isActive ? "text-white" : "text-gray-900"}`}>
-                                                {u.displayName}
+                            // Use div wrapper for ref to avoid button ref issues if any
+                            return (
+                                <div key={`${u.uid}-${u.lastMessage}`} ref={isLastUser ? lastUserElementRef : null} className="w-full">
+                                    <button
+                                        onClick={() => createChat(u)}
+                                        className={`group relative flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-all duration-200 
+                                        ${isActive
+                                                ? "bg-blue-500 shadow-md shadow-blue-500/20"
+                                                : "hover:bg-gray-100"
+                                            }`}
+                                    >
+                                        <div className="relative flex-none">
+                                            <div className={`rounded-full p-0.5 ${isActive ? 'bg-white/20' : 'bg-transparent'}`}>
+                                                <img
+                                                    src={u.avatar || `https://ui-avatars.com/api/?name=${u.displayName}`}
+                                                    alt={u.displayName || "User"}
+                                                    className="h-12 w-12 rounded-full object-cover bg-gray-200"
+                                                />
+                                            </div>
+                                            {getStatusIndicator(u)}
+                                        </div>
+
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex justify-between items-baseline mb-0.5">
+                                                <p className={`truncate text-sm font-semibold ${isActive ? "text-white" : "text-gray-900"}`}>
+                                                    {u.displayName}
+                                                </p>
+                                            </div>
+                                            <p className={`truncate text-xs ${isActive ? "text-white/90" : "text-gray-500"}`}>
+                                                {getLastMessageText(u.uid, isActive, (u as any).lastMessage, (u as any).lastMessageSenderId, (u as any).lastMessageReadAt)}
                                             </p>
                                         </div>
-                                        <p className={`truncate text-xs ${isActive ? "text-white/90" : "text-gray-500"}`}>
-                                            {getLastMessageText(u.uid, isActive, (u as any).lastMessage, (u as any).lastMessageSenderId, (u as any).lastMessageReadAt)}
-                                        </p>
-                                    </div>
-                                </button>
+                                    </button>
+                                </div>
                             );
                         })}
+                        {loading && page > 1 && (
+                            <div className="py-2 text-center text-xs text-gray-500">
+                                Đang tải thêm...
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
-        </div>
+        </div >
     );
 }
