@@ -1,10 +1,20 @@
 "use client";
 
-import { use, useEffect, useState, useCallback } from "react";
+import { use, useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { QRCodeSVG } from "qrcode.react";
 import LoadingOverlay from "@/components/ui/LoadingOverlay";
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { APP_ROUTES } from "@/lib/routes";
+
+// VietQR Configuration - Fallback if PayOS not available
+const VIETQR_CONFIG = {
+    bankId: "970436", // Vietcombank
+    accountNo: "1001000299103", // Your bank account number
+    accountName: "NGUYEN VAN TU", // Account holder name
+    template: "qr_only", // QR template style
+};
 
 interface BookingInfo {
     id: number;
@@ -36,9 +46,10 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
     const [booking, setBooking] = useState<BookingInfo | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [timeLeft, setTimeLeft] = useState<number>(0);
+    const [timeLeft, setTimeLeft] = useState<number>(0); // Start at 0, set from API
     const [isConfirming, setIsConfirming] = useState(false);
     const [isCancelling, setIsCancelling] = useState(false);
+    const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
     // Fetch booking details
     useEffect(() => {
@@ -50,24 +61,17 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
 
         const token = localStorage.getItem('auth_token');
         if (!token) {
-            router.push('/login');
+            router.push(APP_ROUTES.login);
             return;
         }
 
-        fetch(`http://localhost:8000/api/bookings/${bookingId}`, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-            }
-        })
+        api.get(API_ENDPOINTS.bookings.detail(bookingId))
             .then(res => {
-                if (!res.ok) throw new Error('Không tìm thấy đơn đặt sân');
-                return res.json();
-            })
-            .then((data: BookingInfo) => {
+                const data = res.data as BookingInfo;
                 if (data.status !== 'pending') {
                     // Already confirmed or cancelled
                     if (data.status === 'confirmed') {
-                        router.push(`/booking/${venueId}/success?bookingId=${bookingId}`);
+                        router.push(APP_ROUTES.bookings.success(venueId, bookingId));
                     } else {
                         setError('Đơn đặt sân đã hết hạn hoặc bị hủy');
                     }
@@ -75,11 +79,15 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
                 }
                 setBooking(data);
 
-                // Calculate time left
-                const expiresAt = new Date(data.pending_expires_at).getTime();
-                const now = Date.now();
-                const diff = Math.max(0, Math.floor((expiresAt - now) / 1000));
-                setTimeLeft(diff);
+                // Calculate time left from pending_expires_at
+                if (data.pending_expires_at) {
+                    const expiresAt = new Date(data.pending_expires_at).getTime();
+                    const now = Date.now();
+                    const diff = Math.max(0, Math.floor((expiresAt - now) / 1000));
+                    setTimeLeft(diff);
+                } else {
+                    setTimeLeft(10 * 60); // Default 10 minutes
+                }
             })
             .catch(err => {
                 console.error(err);
@@ -88,15 +96,56 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
             .finally(() => setIsLoading(false));
     }, [bookingId, venueId, router]);
 
-    // Countdown timer
+    // Poll payment status every 5 seconds (for future auto-payment detection)
+    // Uncomment this when integrating with PayOS or other payment gateway
+    /*
     useEffect(() => {
-        if (timeLeft <= 0) return;
+        if (!bookingId || !booking || booking.status !== 'pending') return;
+
+        const token = localStorage.getItem('auth_token');
+        if (!token) return;
+
+        const pollPaymentStatus = async () => {
+            try {
+                const res = await fetch(`http://localhost:8000/api/bookings/${bookingId}/payment-status`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                    }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.data?.status === 'confirmed') {
+                        router.push(APP_ROUTES.bookings.success(venueId, bookingId));
+                    } else if (data.data?.status === 'cancelled') {
+                        setError('Đơn đặt sân đã hết hạn hoặc bị hủy');
+                    }
+                }
+            } catch (err) {
+                console.error('Polling error:', err);
+            }
+        };
+
+        pollingRef.current = setInterval(pollPaymentStatus, 5000);
+
+        return () => {
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+            }
+        };
+    }, [bookingId, booking, venueId, router]);
+    */
+
+    // Countdown timer - only run when booking is loaded and timeLeft > 0
+    useEffect(() => {
+        if (!booking || timeLeft <= 0) return;
 
         const timer = setInterval(() => {
             setTimeLeft(prev => {
                 if (prev <= 1) {
                     clearInterval(timer);
-                    handleTimeout();
+                    // Redirect when time expires
+                    alert('Hết thời gian giữ chỗ. Vui lòng đặt lại.');
+                    router.push(APP_ROUTES.bookings.detail(venueId));
                     return 0;
                 }
                 return prev - 1;
@@ -104,12 +153,12 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
         }, 1000);
 
         return () => clearInterval(timer);
-    }, [timeLeft]);
+    }, [booking, router, venueId]); // Remove timeLeft from dependencies
 
     const handleTimeout = useCallback(() => {
         // Booking expired, redirect back
         alert('Hết thời gian giữ chỗ. Vui lòng đặt lại.');
-        router.push(`/booking/${venueId}`);
+        router.push(APP_ROUTES.bookings.detail(venueId));
     }, [router, venueId]);
 
     const handleConfirm = async () => {
@@ -119,21 +168,15 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
         const token = localStorage.getItem('auth_token');
 
         try {
-            const res = await fetch(`http://localhost:8000/api/bookings/${bookingId}/confirm`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                }
-            });
+            const res = await api.post(API_ENDPOINTS.bookings.confirm(bookingId));
 
-            if (!res.ok) {
-                const data = await res.json();
+            if (res.status !== 200) {
+                const data = res.data;
                 throw new Error(data.message || 'Xác nhận thất bại');
             }
 
             // Success - redirect to success page
-            router.push(`/booking/${venueId}/success?bookingId=${bookingId}`);
+            router.push(APP_ROUTES.bookings.success(venueId, bookingId));
         } catch (err: any) {
             alert(err.message);
             setIsConfirming(false);
@@ -149,20 +192,14 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
         const token = localStorage.getItem('auth_token');
 
         try {
-            const res = await fetch(`http://localhost:8000/api/bookings/${bookingId}/cancel`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                }
-            });
+            const res = await api.post(API_ENDPOINTS.bookings.cancel(bookingId));
 
-            if (!res.ok) {
-                const data = await res.json();
+            if (res.status !== 200) {
+                const data = res.data;
                 throw new Error(data.message || 'Hủy thất bại');
             }
 
-            router.push(`/booking/${venueId}`);
+            router.push(APP_ROUTES.bookings.detail(venueId));
         } catch (err: any) {
             alert(err.message);
             setIsCancelling(false);
@@ -192,7 +229,7 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
                     <h2 className="text-2xl font-bold text-slate-800 mb-2">Có lỗi xảy ra</h2>
                     <p className="text-slate-500 mb-6">{error}</p>
                     <Link
-                        href={`/booking/${venueId}`}
+                        href={APP_ROUTES.bookings.detail(venueId)}
                         className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold"
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -280,11 +317,14 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
                             {/* QR Code */}
                             <div className="text-center mb-6">
                                 <div className="inline-block p-4 bg-white rounded-2xl shadow-lg border-2 border-slate-100">
-                                    <QRCodeSVG
-                                        value={`SPORTSBOOKING:${booking.payment_code}:${booking.total_price}`}
-                                        size={200}
-                                        level="H"
-                                        includeMargin={true}
+                                    <img
+                                        src={`https://img.vietqr.io/image/${VIETQR_CONFIG.bankId}-${VIETQR_CONFIG.accountNo}-${VIETQR_CONFIG.template}.png?amount=${booking.total_price}&addInfo=${encodeURIComponent(booking.payment_code)}&accountName=${encodeURIComponent(VIETQR_CONFIG.accountName)}`}
+                                        alt="VietQR Payment Code"
+                                        className="w-52 h-52 object-contain"
+                                        onError={(e) => {
+                                            const target = e.target as HTMLImageElement;
+                                            target.style.display = 'none';
+                                        }}
                                     />
                                 </div>
                                 <p className="mt-4 text-sm text-slate-500">
@@ -302,21 +342,48 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
                                 </div>
                             </div>
 
-                            {/* Demo Notice */}
-                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-                                <div className="flex items-start gap-3">
-                                    <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
+                            {/* Bank Info */}
+                            <div className="bg-slate-50 rounded-xl p-4 mb-6">
+                                <h4 className="font-medium text-slate-800 mb-3 flex items-center gap-2">
+                                    <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                    </svg>
+                                    Thông tin chuyển khoản
+                                </h4>
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">Ngân hàng</span>
+                                        <span className="font-medium text-slate-700">Vietcombank</span>
                                     </div>
-                                    <div>
-                                        <p className="text-sm text-blue-800 font-medium">Chế độ Demo</p>
-                                        <p className="text-xs text-blue-600 mt-1">
-                                            Trong chế độ demo, bạn có thể nhấn nút "Đã thanh toán" bên dưới để xác nhận đặt sân mà không cần quét QR thực.
-                                        </p>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">Số tài khoản</span>
+                                        <span className="font-mono font-medium text-slate-700">{VIETQR_CONFIG.accountNo}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">Chủ tài khoản</span>
+                                        <span className="font-medium text-slate-700">{VIETQR_CONFIG.accountName}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">Nội dung CK</span>
+                                        <span className="font-mono font-medium text-indigo-600">{booking.payment_code}</span>
                                     </div>
                                 </div>
+                            </div>
+
+                            {/* Payment Instructions - inside card */}
+                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+                                <h4 className="font-medium text-amber-800 mb-2 flex items-center gap-2">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Hướng dẫn thanh toán
+                                </h4>
+                                <ol className="text-sm text-amber-700 space-y-1 list-decimal list-inside">
+                                    <li>Mở ứng dụng ngân hàng</li>
+                                    <li>Quét mã QR trên màn hình</li>
+                                    <li>Xác nhận thanh toán</li>
+                                    <li>Nhấn "Đã thanh toán" để hoàn tất</li>
+                                </ol>
                             </div>
 
                             {/* Action Buttons */}
@@ -361,34 +428,6 @@ export default function PaymentPage({ params }: { params: Promise<{ venueId: str
                                     )}
                                 </button>
                             </div>
-                        </div>
-
-                        {/* Payment Instructions */}
-                        <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-5">
-                            <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
-                                <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                Hướng dẫn thanh toán
-                            </h4>
-                            <ol className="space-y-2 text-sm text-slate-600">
-                                <li className="flex items-start gap-2">
-                                    <span className="w-5 h-5 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">1</span>
-                                    <span>Mở ứng dụng ngân hàng hoặc ví điện tử</span>
-                                </li>
-                                <li className="flex items-start gap-2">
-                                    <span className="w-5 h-5 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">2</span>
-                                    <span>Quét mã QR hiển thị phía trên</span>
-                                </li>
-                                <li className="flex items-start gap-2">
-                                    <span className="w-5 h-5 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">3</span>
-                                    <span>Xác nhận thanh toán trên ứng dụng</span>
-                                </li>
-                                <li className="flex items-start gap-2">
-                                    <span className="w-5 h-5 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">4</span>
-                                    <span>Nhấn "Đã thanh toán" để hoàn tất</span>
-                                </li>
-                            </ol>
                         </div>
                         {/* Bottom Spacer */}
                         <div className="h-6"></div>

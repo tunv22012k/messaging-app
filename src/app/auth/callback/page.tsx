@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { APP_ROUTES } from "@/lib/routes";
 
 export default function AuthCallback() {
     const router = useRouter();
@@ -14,13 +15,13 @@ export default function AuthCallback() {
 
         if (token) {
             loginWithToken(token).then(() => {
-                router.push("/");
+                router.push(APP_ROUTES.home);
             }).catch((err) => {
                 console.error("Login failed", err);
-                router.push("/login?error=auth_failed");
+                router.push(`${APP_ROUTES.login}?error=auth_failed`);
             });
         } else {
-            router.push("/login?error=no_token");
+            router.push(`${APP_ROUTES.login}?error=no_token`);
         }
     }, [searchParams, loginWithToken, router]);
 

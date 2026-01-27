@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { APP_ROUTES } from "@/lib/routes";
 
 interface Booking {
     id: number;
@@ -28,14 +31,9 @@ export default function MyBookingsPage() {
             return; // Or redirect
         }
 
-        fetch('http://localhost:8000/api/bookings', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
+        api.get(API_ENDPOINTS.bookings.list)
             .then(res => {
-                if (res.status === 401) throw new Error("Unauthorized");
-                return res.json();
-            })
-            .then((data: any[]) => {
+                const data = res.data as any[];
                 const mapped: Booking[] = data.map(b => ({
                     id: b.id,
                     venueId: b.court?.venue?.id,
@@ -149,8 +147,8 @@ export default function MyBookingsPage() {
                                         {/* Action Buttons */}
                                         <div className="flex gap-2">
                                             <Link
-                                                href={`/booking/${booking.venueId}`}
-                                                className="text-sm text-blue-600 font-medium hover:underline"
+                                                href={APP_ROUTES.bookings.detail(booking.venueId)}
+                                                className="font-bold text-gray-800 hover:text-blue-600 text-lg transition-colors"
                                             >
                                                 Book Again
                                             </Link>
@@ -160,10 +158,10 @@ export default function MyBookingsPage() {
                             </div>
                         ))
                     ) : (
-                        <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-200">
-                            <div className="text-gray-400 mb-2">No {activeTab} bookings found</div>
-                            <Link href="/map" className="text-blue-600 font-medium hover:underline">
-                                Book a new venue
+                        <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm text-center">
+                            <p className="text-gray-500 text-lg mb-4">You haven't made any bookings yet.</p>
+                            <Link href={APP_ROUTES.map.index} className="text-blue-600 font-medium hover:underline">
+                                Find a court to book
                             </Link>
                         </div>
                     )}

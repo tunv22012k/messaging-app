@@ -4,12 +4,25 @@ import { use, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import LoadingOverlay from "@/components/ui/LoadingOverlay";
+import echo from "@/lib/echo";
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { APP_ROUTES } from "@/lib/routes";
 
 // Types matching Backend Response (simplified)
 interface Booking {
     court_id: number;
     start_time: string; // H:i
     end_time: string;
+}
+
+interface PendingSlot {
+    id: number;
+    court_id: number;
+    user_id: number;
+    start_time: string;
+    end_time: string;
+    pending_expires_at: string;
 }
 
 interface Court {
@@ -30,6 +43,18 @@ interface VenueReview {
     rating: number;
     comment: string;
     created_at: string;
+}
+
+interface Slot {
+    id: string;
+    courtId: string;
+    startTime: string;
+    endTime: string;
+    price: number;
+    isBooked: boolean;
+    isPending: boolean;
+    isOwnPending: boolean;
+    pendingBookingId: number | null;
 }
 
 interface Venue {
@@ -70,12 +95,9 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
 
     // Fetch Venue
     useEffect(() => {
-        fetch(`http://localhost:8000/api/venues/${venueId}`)
+        api.get(API_ENDPOINTS.venues.detail(venueId))
             .then(res => {
-                if (!res.ok) throw new Error("Venue not found");
-                return res.json();
-            })
-            .then((data: Venue) => {
+                const data = res.data;
                 setVenue(data);
                 if (data.courts.length > 0) {
                     setSelectedCourtId(String(data.courts[0].id));
@@ -88,44 +110,67 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
             .finally(() => setIsLoading(false));
     }, [venueId]);
 
-    // Fetch Bookings when Date changes
-    useEffect(() => {
-        if (!venueId) return;
-
-        fetch(`http://localhost:8000/api/venues/${venueId}/bookings?date=${bookingDate}`)
-            .then(res => res.json())
-            .then(data => setBookings(data))
-            .catch(err => console.error("Failed to fetch bookings", err));
-    }, [venueId, bookingDate]);
+    // Bookings will be fetched together with pending slots in the combined polling below
 
     // Pending slots from other users
-    const [pendingSlots, setPendingSlots] = useState<{ court_id: number; start_time: string; end_time: string }[]>([]);
+    const [pendingSlots, setPendingSlots] = useState<PendingSlot[]>([]);
 
-    // Fetch Pending Slots
+    // Current user id for identifying own pending bookings
+    const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+
+    // Fetch current user
+    useEffect(() => {
+        api.get(API_ENDPOINTS.auth.user)
+            .then(res => {
+                setCurrentUserId(res.data.id);
+            })
+            .catch(err => console.error('Failed to fetch user', err));
+    }, []);
+
+    // Fetch Pending Slots and Bookings - refresh both to keep in sync
+    // Real-time updates via WebSocket
     useEffect(() => {
         if (!venueId) return;
 
-        const fetchPendingSlots = () => {
-            fetch(`http://localhost:8000/api/venues/${venueId}/pending-slots?date=${bookingDate}`)
-                .then(res => res.json())
-                .then(data => setPendingSlots(data))
+        const fetchBookingData = () => {
+            // Fetch confirmed bookings
+            api.get(`${API_ENDPOINTS.venues.bookings(venueId)}?date=${bookingDate}`)
+                .then(res => setBookings(res.data))
+                .catch(err => console.error("Failed to fetch bookings", err));
+
+            // Fetch pending slots
+            api.get(`${API_ENDPOINTS.venues.pendingSlots(venueId)}?date=${bookingDate}`)
+                .then(res => setPendingSlots(res.data))
                 .catch(err => console.error("Failed to fetch pending slots", err));
         };
 
-        fetchPendingSlots();
-        // Refresh every 10 seconds
-        const interval = setInterval(fetchPendingSlots, 10000);
-        return () => clearInterval(interval);
+        // Initial fetch
+        fetchBookingData();
+
+        // Subscribe to venue channel if echo is available
+        if (echo) {
+            const channel = echo.channel(`venue.${venueId}`);
+
+            channel.listen('.booking.pending', (e: any) => {
+                console.log('Booking update received:', e);
+                fetchBookingData();
+            });
+
+            return () => {
+                channel.stopListening('.booking.pending');
+                echo.leave(`venue.${venueId}`);
+            };
+        }
     }, [venueId, bookingDate]);
 
     // Generate Available Slots Logic
-    const availableSlots = useMemo(() => {
+    const availableSlots: Slot[] = useMemo(() => {
         if (!venue || !selectedCourtId) return [];
 
         const court = venue.courts.find(c => String(c.id) === selectedCourtId);
         if (!court) return [];
 
-        const slots = [];
+        const slots: Slot[] = [];
         for (let hour = 6; hour < 22; hour++) {
             const startTime = `${hour.toString().padStart(2, '0')}:00`;
             const endTime = `${(hour + 1).toString().padStart(2, '0')}:00`;
@@ -145,7 +190,7 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
             });
 
             // Check if slot is pending by another user
-            const isPending = pendingSlots.some(p => {
+            const pendingSlot = pendingSlots.find(p => {
                 if (String(p.court_id) !== selectedCourtId) return false;
 
                 const [ph, pm] = String(p.start_time).split(':').map(Number);
@@ -159,6 +204,10 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                 return pStart < slotEnd && pEnd > slotStart;
             });
 
+            const isPending = !!pendingSlot;
+            const isOwnPending = pendingSlot ? pendingSlot.user_id === currentUserId : false;
+            const pendingBookingId = pendingSlot?.id || null;
+
             const price = parseInt(venue.price_info.replace(/\D/g, '')) || 100000;
 
             slots.push({
@@ -168,11 +217,13 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                 endTime,
                 price,
                 isBooked,
-                isPending
+                isPending,
+                isOwnPending,
+                pendingBookingId
             });
         }
         return slots;
-    }, [venue, selectedCourtId, bookings, pendingSlots]);
+    }, [venue, selectedCourtId, bookings, pendingSlots, currentUserId]);
 
 
 
@@ -236,30 +287,18 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
             }
 
             // Call initiate API to create pending booking
-            const res = await fetch('http://localhost:8000/api/bookings/initiate', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    court_id: slot.courtId,
-                    date: bookingDate,
-                    start_time: slot.startTime,
-                    end_time: slot.endTime,
-                    total_price: totalPrice // includes extras
-                })
+            const res = await api.post(API_ENDPOINTS.bookings.initiate, {
+                court_id: slot.courtId,
+                date: bookingDate,
+                start_time: slot.startTime,
+                end_time: slot.endTime,
+                total_price: totalPrice // includes extras
             });
 
-            if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.message || 'Đặt sân thất bại');
-            }
-
-            const data = await res.json();
+            const data = res.data;
 
             // Redirect to payment page
-            router.push(`/booking/${venueId}/payment?bookingId=${data.booking.id}`);
+            router.push(APP_ROUTES.bookings.payment(venueId, data.booking.id));
 
         } catch (err: any) {
             alert(`Đặt sân thất bại: ${err.message}`);
@@ -276,20 +315,13 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
 
         setSubmittingReview(true);
         try {
-            const res = await fetch(`http://localhost:8000/api/venues/${venueId}/reviews`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify(newReview)
-            });
+            const res = await api.post(API_ENDPOINTS.venues.reviews(venueId), newReview);
 
-            if (res.ok) {
+            if (res.status === 200 || res.status === 201) {
                 if (venue) {
-                    const vRes = await fetch(`http://localhost:8000/api/venues/${venueId}`);
-                    if (vRes.ok) {
-                        const vData = await vRes.json();
+                    const vRes = await api.get(API_ENDPOINTS.venues.detail(venueId));
+                    if (vRes.status === 200) {
+                        const vData = vRes.data;
                         setVenue(vData);
                     }
                 }
@@ -642,7 +674,7 @@ interface BookingCardProps {
     setBookingDate: (date: string) => void;
     selectedCourtId: string;
     setSelectedCourtId: (id: string) => void;
-    availableSlots: { id: string; courtId: string; startTime: string; endTime: string; price: number; isBooked: boolean; isPending?: boolean }[];
+    availableSlots: Slot[];
     selectedSlotIds: string[];
     handleSlotToggle: (slotId: string) => void;
     selectedExtraIds: string[];
@@ -779,35 +811,71 @@ function BookingCard({
                     <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
                         {availableSlots.map(slot => {
                             const isPast = isSlotPast(bookingDate, slot.startTime);
-                            const isDisabled = slot.isBooked || slot.isPending || isPast;
+                            // Own pending slots are clickable (to continue payment)
+                            const isDisabled = slot.isBooked || (slot.isPending && !slot.isOwnPending) || isPast;
                             const isSelected = selectedSlotIds.includes(slot.id);
+
+                            // Handle click for own pending slots
+                            const handleClick = () => {
+                                if (slot.isOwnPending && slot.pendingBookingId && venue) {
+                                    // Navigate to payment page for this booking
+                                    // Fix: Use router.push via APP_ROUTES if possible, otherwise window.location
+                                    // Using window.location to force full reload if necessary, but preferred router.push
+                                    window.location.href = APP_ROUTES.bookings.payment(venue.id, slot.pendingBookingId);
+                                } else if (!isDisabled) {
+                                    handleSlotToggle(slot.id);
+                                }
+                            };
+
+                            // Determine slot status text and styling
+                            let statusText = '';
+                            let slotStyle = '';
+
+                            if (slot.isBooked) {
+                                statusText = 'Đã đặt';
+                                slotStyle = 'bg-rose-50 text-rose-400 border-rose-200 cursor-not-allowed';
+                            } else if (slot.isOwnPending) {
+                                statusText = 'Bạn đang đặt';
+                                slotStyle = 'bg-blue-100 text-blue-700 border-blue-400 cursor-pointer hover:bg-blue-200';
+                            } else if (slot.isPending) {
+                                statusText = 'Có người đang đặt';
+                                slotStyle = 'bg-yellow-100 text-yellow-700 border-yellow-400 cursor-not-allowed';
+                            } else if (isPast) {
+                                statusText = 'Hết hạn';
+                                slotStyle = 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed';
+                            }
 
                             return (
                                 <button
                                     key={slot.id}
                                     type="button"
-                                    disabled={isDisabled}
-                                    onClick={() => handleSlotToggle(slot.id)}
+                                    disabled={isDisabled && !slot.isOwnPending}
+                                    onClick={handleClick}
                                     className={`
                                         relative text-sm py-3 px-3 rounded-xl border-2 transition-all text-center group
-                                        ${isDisabled
-                                            ? slot.isBooked
-                                                ? 'bg-rose-50 text-rose-400 border-rose-200 cursor-not-allowed'
-                                                : slot.isPending
-                                                    ? 'bg-yellow-100 text-yellow-700 border-yellow-400 cursor-not-allowed'
-                                                    : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
+                                        ${statusText
+                                            ? slotStyle
                                             : isSelected
                                                 ? 'bg-gradient-to-r from-indigo-600 to-purple-600 border-transparent text-white shadow-lg shadow-indigo-200'
                                                 : 'bg-white border-slate-200 text-slate-700 hover:border-indigo-400 hover:shadow-md'
                                         }
                                     `}
                                 >
-                                    <div className={`font-bold text-xs ${slot.isPending ? 'text-yellow-800' : ''}`}>{slot.startTime} - {slot.endTime}</div>
-                                    <div className={`text-[11px] mt-1 ${isSelected ? 'text-indigo-200' : slot.isPending ? 'text-yellow-600 font-medium' : 'text-slate-400 group-hover:text-indigo-500'}`}>
-                                        {isDisabled
-                                            ? (slot.isBooked ? 'Đã đặt' : slot.isPending ? 'Có người đang đặt' : 'Hết hạn')
-                                            : formatCurrency(slot.price)}
+                                    <div className={`font-bold text-xs ${slot.isPending && !slot.isOwnPending ? 'text-yellow-800' : slot.isOwnPending ? 'text-blue-800' : ''}`}>
+                                        {slot.startTime} - {slot.endTime}
                                     </div>
+                                    <div className={`text-[11px] mt-1 ${isSelected ? 'text-indigo-200'
+                                        : slot.isOwnPending ? 'text-blue-600 font-medium'
+                                            : slot.isPending ? 'text-yellow-600 font-medium'
+                                                : 'text-slate-400 group-hover:text-indigo-500'
+                                        }`}>
+                                        {statusText || formatCurrency(slot.price)}
+                                    </div>
+                                    {slot.isOwnPending && (
+                                        <div className="text-[10px] mt-1 text-blue-500 font-medium">
+                                            ► Tiếp tục thanh toán
+                                        </div>
+                                    )}
                                 </button>
                             );
                         })}

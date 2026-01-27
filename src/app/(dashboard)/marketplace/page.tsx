@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { APP_ROUTES } from "@/lib/routes";
 
 interface MarketplaceItem {
     id: number;
@@ -24,25 +27,9 @@ export default function MarketplacePage() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        fetch('http://localhost:8000/api/marketplace')
-            .then(async res => {
-                if (res.status === 401) {
-                    const token = localStorage.getItem('auth_token');
-                    if (token) {
-                        return fetch('http://localhost:8000/api/marketplace', {
-                            headers: { 'Authorization': `Bearer ${token}` }
-                        });
-                    }
-                    // If public, backend should allow public access. Currently middleware protects it.
-                    // Assuming middleware auth:sanctum is on.
-                    // If user not logged in, we might show empty or error.
-                    // For now, allow 401 to fail.
-                    throw new Error("Unauthorized");
-                }
-                return res;
-            })
-            .then(res => res.json())
-            .then((data: any[]) => {
+        api.get(API_ENDPOINTS.marketplace.items)
+            .then(res => {
+                const data = res.data as any[];
                 const mapped: MarketplaceItem[] = data.map(b => ({
                     id: b.id,
                     venueName: b.court?.venue?.name || "Unknown Venue",
@@ -71,24 +58,18 @@ export default function MarketplacePage() {
         if (!confirm("Are you sure you want to purchase this transfer?")) return;
 
         try {
-            const res = await fetch(`http://localhost:8000/api/marketplace/${id}/purchase`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
+            const res = await api.post(API_ENDPOINTS.marketplace.purchase(id));
 
-            if (res.ok) {
+            if (res.status === 200 || res.status === 201) {
                 alert("Purchase successful! Check My Bookings.");
                 // Remove from list
                 setListings(prev => prev.filter(item => item.id !== id));
             } else {
-                const err = await res.json();
-                alert(err.message || "Purchase failed");
+                alert("Purchase failed");
             }
-        } catch (e) {
-            alert("Error purchasing");
+        } catch (e: any) {
+            const message = e.response?.data?.message || "Error purchasing";
+            alert(message);
         }
     };
 
@@ -159,9 +140,9 @@ export default function MarketplacePage() {
                                 </div>
 
                                 <div className="text-sm text-gray-600 space-y-1 mb-4">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-medium">{item.courtName}</span>
-                                    </div>
+                                    <Link href={APP_ROUTES.bookings.detail(item.id)} className="flex items-center gap-2 font-medium hover:text-blue-600">
+                                        {item.courtName}
+                                    </Link>
                                     <div className="flex items-center gap-2">
                                         <span>📅 {item.date}</span>
                                         <span>⏰ {item.time}</span>

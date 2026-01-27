@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { APP_ROUTES } from "@/lib/routes";
 import { useAuth } from "@/context/AuthContext";
+
 import { useRouter, usePathname } from "next/navigation";
 import { useNotification } from "@/context/NotificationContext";
 
@@ -60,7 +62,7 @@ export default function Header() {
         <header className="h-16 flex-none bg-white border-b border-gray-200 px-4 md:px-8 flex items-center justify-between z-20 shadow-sm relative">
             {/* Left: Logo / Home */}
             <div className="flex items-center gap-2 md:gap-4 flex-none w-auto md:w-48">
-                <Link href="/" className="flex items-center gap-2 group">
+                <Link href={APP_ROUTES.home} className="flex items-center gap-2 group">
                     <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg group-hover:bg-blue-700 transition-colors">
                         S
                     </div>
@@ -97,7 +99,7 @@ export default function Header() {
                 {user && (
                     <>
                         <button
-                            onClick={() => router.push('/profile')}
+                            onClick={() => router.push(APP_ROUTES.profile)}
                             className="flex items-center gap-3 hover:bg-gray-50 p-2 rounded-xl transition-colors"
                         >
                             <span className="text-sm font-medium text-gray-700 hidden lg:block">
@@ -112,8 +114,10 @@ export default function Header() {
 
                         <button
                             onClick={async () => {
-                                await logout();
-                                router.push('/login');
+                                if (confirm('Bạn có chắc muốn đăng xuất?')) {
+                                    await logout();
+                                    router.push(APP_ROUTES.login);
+                                }
                             }}
                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
                             title="Logout"

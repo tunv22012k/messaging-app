@@ -11,6 +11,9 @@ import { usePresence } from "@/hooks/usePresence";
 import echo from "@/lib/echo";
 import { formatDistanceToNow } from 'date-fns';
 import { vi } from 'date-fns/locale';
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { APP_ROUTES } from "@/lib/routes";
 
 export default function Sidebar() {
     const { user, logout } = useAuth();
@@ -69,16 +72,14 @@ export default function Sidebar() {
         const token = localStorage.getItem('auth_token');
 
         // Append page and search parameters
-        let url = `http://localhost:8000/api/chats?page=${page}`;
+        let url = `${API_ENDPOINTS.chats.list}?page=${page}`;
         if (debouncedSearch) {
             url += `&search=${encodeURIComponent(debouncedSearch)}`;
         }
 
-        fetch(url, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
-            .then(res => res.json())
-            .then((response: any) => {
+        api.get(url)
+            .then(res => {
+                const response = res.data;
                 // Check if response is paginated (has data property)
                 const isPaginated = Array.isArray(response.data);
                 const rawUsers = isPaginated ? response.data : response;
@@ -219,12 +220,9 @@ export default function Sidebar() {
     }, [user]);
 
     const fetchUserAndAdd = (uid: string, initialMessage?: string) => {
-        const token = localStorage.getItem('auth_token');
-        fetch(`http://localhost:8000/api/users/${uid}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
-            .then(res => res.json())
-            .then(data => {
+        api.get(API_ENDPOINTS.users.detail(uid))
+            .then(res => {
+                const data = res.data;
                 const newUser: User = {
                     uid: data.google_id || String(data.id),
                     id: data.id, // Add this line
@@ -263,13 +261,9 @@ export default function Sidebar() {
         if (exists) return;
 
         // Fetch this user
-        const token = localStorage.getItem('auth_token');
-        fetch(`http://localhost:8000/api/users/${otherUid}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
+        api.get(API_ENDPOINTS.users.detail(otherUid))
             .then(res => {
-                if (!res.ok) throw new Error("User not found via ID");
-                return res.json();
+                return res.data;
             })
             .then(data => {
                 const newUser: User = {
@@ -307,7 +301,7 @@ export default function Sidebar() {
             return u;
         }));
 
-        router.push(`/chat/${chatId}`);
+        router.push(APP_ROUTES.chat.detail(chatId));
     };
 
     const getStatusIndicator = (user: User) => {

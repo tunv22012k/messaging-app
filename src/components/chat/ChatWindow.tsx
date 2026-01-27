@@ -12,6 +12,9 @@ import Link from "next/link";
 import MediaModal from "@/components/ui/MediaModal";
 import echo from "@/lib/echo";
 import { usePresence } from "@/hooks/usePresence";
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { APP_ROUTES } from "@/lib/routes";
 
 interface ChatWindowProps {
     chatId: string;
@@ -21,13 +24,8 @@ const markAsRead = async (chatId: string) => {
     const token = localStorage.getItem('auth_token');
     if (!token) return;
     try {
-        const res = await fetch(`http://localhost:8000/api/chats/${chatId}/read`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
-        });
-        if (res.ok) {
+        const res = await api.post(API_ENDPOINTS.chats.read(chatId));
+        if (res.status === 200) {
             window.dispatchEvent(new Event("REFRESH_UNREAD_COUNT"));
         }
     } catch (e) {
@@ -63,14 +61,8 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
 
         if (!recipientId) return;
 
-        const token = localStorage.getItem('auth_token');
-        fetch(`http://localhost:8000/api/users/${recipientId}`, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/json'
-            }
-        })
-            .then(res => res.json())
+        api.get(API_ENDPOINTS.users.detail(recipientId))
+            .then(res => setRecipient(res.data))
             .then(data => setRecipient(data))
             .catch(err => console.error("Failed to fetch recipient", err));
     }, [chatId, user]);
@@ -92,20 +84,16 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
         }
 
         try {
-            const url = new URL(`http://localhost:8000/api/chats/${chatId}/messages`);
+            // Construct relative URL for api instance
+            let url = `${API_ENDPOINTS.chats.messages(chatId)}?limit=20`;
             if (beforeTimestamp) {
                 const dateStr = new Date(beforeTimestamp).toISOString().slice(0, 19).replace('T', ' ');
-                url.searchParams.append('before', dateStr);
+                url += `&before=${encodeURIComponent(dateStr)}`;
             }
-            url.searchParams.append('limit', '20');
 
-            const res = await fetch(url.toString(), {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/json'
-                }
-            });
-            const data = await res.json();
+            // Note: api.get already handles base URL and auth tokens
+            const res = await api.get(url);
+            const data = res.data;
 
             const mappedMessages = (data.messages || []).map((m: any) => ({
                 ...m,
@@ -310,22 +298,16 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
         const socketId = echo?.connector?.pusher?.connection?.socket_id;
 
         try {
-            const res = await fetch(`http://localhost:8000/api/chats/${chatId}/messages`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/json',
-                    ...(socketId ? { 'X-Socket-ID': socketId } : {})
-                },
-                body: JSON.stringify({
-                    text,
-                    type: 'text'
-                })
-            });
+            const headers: any = {};
+            if (socketId) headers['X-Socket-ID'] = socketId;
 
-            if (res.ok) {
-                const data = await res.json();
+            const res = await api.post(API_ENDPOINTS.chats.messages(chatId), {
+                text,
+                type: 'text'
+            }, { headers });
+
+            if (res.status === 200 || res.status === 201) {
+                const data = res.data;
                 setMessages(prev => {
                     const newMsg = {
                         ...data.message,
@@ -395,19 +377,15 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
         }));
 
         try {
-            const res = await fetch(`http://localhost:8000/api/messages/${messageId}/react`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/json',
-                    ...(socketId ? { 'X-Socket-ID': socketId } : {})
-                },
-                body: JSON.stringify({ reaction: emoji })
-            });
+            const headers: any = {};
+            if (socketId) headers['X-Socket-ID'] = socketId;
 
-            if (res.ok) {
-                const data = await res.json();
+            const res = await api.post(API_ENDPOINTS.chats.react(messageId), {
+                reaction: emoji
+            }, { headers });
+
+            if (res.status === 200 || res.status === 201) {
+                const data = res.data;
                 setMessages(prev => prev.map(m => {
                     if (String(m.id) === String(messageId)) {
                         return { ...m, reactions: data.reactions };
@@ -419,7 +397,6 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
             console.error("Failed to send reaction", err);
         }
     };
-
     const sendMedia = async (mediaData: any) => {
         if (!user || !chatId) return;
 
@@ -428,23 +405,17 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
         const type = mediaData.mimeType?.startsWith('video/') ? 'video' : 'image';
 
         try {
-            const res = await fetch(`http://localhost:8000/api/chats/${chatId}/messages`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/json',
-                    ...(socketId ? { 'X-Socket-ID': socketId } : {})
-                },
-                body: JSON.stringify({
-                    text: "", // Optional caption could be added later
-                    type: type,
-                    media: mediaData
-                })
-            });
+            const headers: any = {};
+            if (socketId) headers['X-Socket-ID'] = socketId;
 
-            if (res.ok) {
-                const data = await res.json();
+            const res = await api.post(API_ENDPOINTS.chats.messages(chatId), {
+                text: "", // Optional caption could be added later
+                type: type,
+                media: mediaData
+            }, { headers });
+
+            if (res.status === 200 || res.status === 201) {
+                const data = res.data;
                 setMessages(prev => {
                     const newMsg = {
                         ...data.message,
@@ -496,7 +467,7 @@ export default function ChatWindow({ chatId }: ChatWindowProps) {
     return (
         <div className="flex h-full flex-col bg-gray-50">
             <div className="border-b bg-white p-4 shadow-sm flex items-center gap-3">
-                <Link href="/chat" className="md:hidden p-2 -ml-2 text-gray-600 hover:text-gray-900">
+                <Link href={APP_ROUTES.chat.index} className="md:hidden p-2 -ml-2 text-gray-600 hover:text-gray-900">
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                     </svg>

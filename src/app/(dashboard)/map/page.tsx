@@ -4,7 +4,8 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from "@react-google-maps/api";
 import { Venue } from "@/data/venues";
 import Link from "next/link";
-
+import { useRouter } from "next/navigation";
+import { APP_ROUTES } from "@/lib/routes";
 const containerStyle = {
     width: '100%',
     height: 'calc(100vh - 64px)' // Full height minus header/sidebar offset if needed
@@ -247,7 +248,7 @@ export default function MapPage() {
                             <p className="text-xs text-gray-500 mb-3">{selectedVenue.address}</p>
 
                             <Link
-                                href={`/booking/${selectedVenue.id}`}
+                                href={APP_ROUTES.bookings.detail(selectedVenue.id)}
                                 className="block w-full text-center bg-blue-600 text-white py-1.5 px-3 rounded hover:bg-blue-700 transition active:scale-95"
                             >
                                 Book Now

@@ -8,6 +8,9 @@ import { usePresence } from "@/hooks/usePresence";
 import { formatDistanceToNow } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
+import api from '@/lib/axios';
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { APP_ROUTES } from "@/lib/routes";
 
 const PER_PAGE = 20;
 
@@ -40,11 +43,9 @@ export default function PeoplePage() {
         if (!user) return;
         const token = localStorage.getItem('auth_token');
 
-        fetch('http://localhost:8000/api/chats', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
-            .then(res => res.json())
-            .then(chatsData => {
+        api.get(API_ENDPOINTS.chats.list)
+            .then(res => {
+                const chatsData = res.data;
                 const chatIds = new Set<string>();
                 chatsData.forEach((chatUser: any) => {
                     const theirUid = chatUser.google_id || String(chatUser.id);
@@ -62,19 +63,17 @@ export default function PeoplePage() {
     const fetchUsers = useCallback(async (page: number, search: string, append: boolean = false) => {
         if (!user) return;
 
-        const token = localStorage.getItem('auth_token');
-        const url = new URL('http://localhost:8000/api/users');
-        url.searchParams.set('page', String(page));
-        url.searchParams.set('per_page', String(PER_PAGE));
+        const params: any = {
+            page: page,
+            per_page: PER_PAGE
+        };
         if (search) {
-            url.searchParams.set('search', search);
+            params.search = search;
         }
 
         try {
-            const res = await fetch(url.toString(), {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            const data = await res.json();
+            const res = await api.get(API_ENDPOINTS.users.list, { params });
+            const data = res.data;
 
             const mappedUsers = data.data.map((u: any) => ({
                 uid: u.google_id || String(u.id),
@@ -122,7 +121,7 @@ export default function PeoplePage() {
     const handleConnect = (targetUser: User) => {
         if (!user) return;
         const chatId = [user.uid, targetUser.uid].sort().join("_");
-        router.push(`/chat/${chatId}`);
+        router.push(APP_ROUTES.chat.detail(chatId));
     };
 
     const hasExistingChat = (targetUser: User): boolean => {
@@ -151,11 +150,6 @@ export default function PeoplePage() {
 
                         {/* Search Bar */}
                         <div className="relative w-full md:w-96">
-                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                </svg>
-                            </div>
                             <input
                                 type="text"
                                 placeholder="Tìm kiếm theo tên hoặc email..."
@@ -163,6 +157,11 @@ export default function PeoplePage() {
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                             />
+                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
                         </div>
                     </div>
 

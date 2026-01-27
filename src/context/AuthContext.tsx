@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { User } from "@/types";
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
 
 interface AuthContextType {
     user: User | null;
@@ -44,15 +46,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const fetchUser = async (token: string) => {
         try {
-            const response = await fetch('http://localhost:8000/api/user', {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/json',
-                }
-            });
+            // Token is attached automatically by interceptor if in localStorage, 
+            // but for initial load where we might just have it in args, we rely on localStorage being set prior or interceptor reading it.
+            // In loginWithToken, we setItem first, so it works.
+            // In useEffect, we check getItem, so it works.
+            const response = await api.get(API_ENDPOINTS.auth.user);
 
-            if (response.ok) {
-                const data = await response.json();
+            if (response.status === 200) {
+                const data = response.data;
                 setUser(mapBackendUser(data));
             } else {
                 localStorage.removeItem('auth_token');
@@ -78,7 +79,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const signInWithGoogle = () => {
         // Redirect to Backend Socialite Endpoint
-        window.location.href = 'http://localhost:8000/api/auth/google/redirect';
+        window.location.href = API_ENDPOINTS.auth.google;
     };
 
     const signInWithFacebook = () => {
@@ -95,13 +96,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const token = localStorage.getItem('auth_token');
         if (token) {
             try {
-                await fetch('http://localhost:8000/api/logout', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Accept': 'application/json',
-                    }
-                });
+                await api.post(API_ENDPOINTS.auth.logout);
             } catch (error) {
                 console.error("Logout failed", error);
             }

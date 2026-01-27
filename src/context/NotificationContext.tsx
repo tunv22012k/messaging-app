@@ -3,6 +3,8 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import echo from "@/lib/echo";
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
 
 interface NotificationContextType {
     unreadCount: number;
@@ -23,13 +25,9 @@ export const NotificationProvider = ({ children }: { children: React.ReactNode }
     const fetchUnreadCount = async () => {
         if (!user) return;
         try {
-            const token = localStorage.getItem('auth_token');
-            const res = await fetch('http://localhost:8000/api/messages/unread-count', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setUnreadCount(data.count);
+            const res = await api.get(API_ENDPOINTS.notifications.unreadCount);
+            if (res.status === 200) {
+                setUnreadCount(res.data.count);
             }
         } catch (error) {
             console.error("Failed to fetch unread count", error);

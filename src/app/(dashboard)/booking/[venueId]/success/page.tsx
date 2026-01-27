@@ -3,6 +3,10 @@
 import { use, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import LoadingOverlay from "@/components/ui/LoadingOverlay";
+import api from "@/lib/axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { APP_ROUTES } from "@/lib/routes";
 
 interface BookingInfo {
     id: number;
@@ -25,6 +29,28 @@ interface BookingInfo {
     created_at: string;
 }
 
+// Skeleton data to render the structure while loading
+const skeletonBooking: BookingInfo = {
+    id: 0,
+    court: {
+        id: 0,
+        name: 'Sân ...',
+        venue: {
+            id: 0,
+            name: 'Đang tải thông tin...',
+            address: '...',
+            image: ''
+        }
+    },
+    date: new Date().toISOString(),
+    start_time: '--:--',
+    end_time: '--:--',
+    total_price: 0,
+    status: 'loading',
+    payment_code: '......',
+    created_at: ''
+};
+
 export default function SuccessPage({ params }: { params: Promise<{ venueId: string }> }) {
     const { venueId } = use(params);
     const router = useRouter();
@@ -36,35 +62,30 @@ export default function SuccessPage({ params }: { params: Promise<{ venueId: str
 
     useEffect(() => {
         if (!bookingId) {
-            router.push(`/booking/${venueId}`);
+            router.push(APP_ROUTES.bookings.detail(venueId));
             return;
         }
 
         const token = localStorage.getItem('auth_token');
         if (!token) {
-            router.push('/login');
+            router.push(APP_ROUTES.login);
             return;
         }
 
-        fetch(`http://localhost:8000/api/bookings/${bookingId}`, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-            }
-        })
+        // Fetch immediately
+        api.get<BookingInfo>(API_ENDPOINTS.bookings.detail(bookingId))
             .then(res => {
-                if (!res.ok) throw new Error('Không tìm thấy đơn đặt sân');
-                return res.json();
-            })
-            .then((data: BookingInfo) => {
+                const data = res.data;
                 if (data.status !== 'confirmed') {
-                    router.push(`/booking/${venueId}`);
+                    // Not confirmed?
+                    router.push(APP_ROUTES.bookings.detail(venueId));
                     return;
                 }
                 setBooking(data);
             })
             .catch(err => {
                 console.error(err);
-                router.push(`/booking/${venueId}`);
+                router.push(APP_ROUTES.bookings.detail(venueId));
             })
             .finally(() => setIsLoading(false));
     }, [bookingId, venueId, router]);
@@ -73,180 +94,157 @@ export default function SuccessPage({ params }: { params: Promise<{ venueId: str
         return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
     };
 
-    if (isLoading) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="w-16 h-16 mx-auto mb-4 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin"></div>
-                    <p className="text-slate-500 font-medium">Đang tải thông tin...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (!booking) {
-        return null;
-    }
+    // Use skeleton data if real data isn't ready, to allow rendering layout for sticking/blurring
+    const displayData = booking || skeletonBooking;
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 py-8 px-4">
-            <div className="max-w-lg mx-auto">
-                {/* Success Animation */}
-                <div className="text-center mb-8">
-                    <div className="relative inline-block">
-                        <div className="w-28 h-28 mx-auto bg-gradient-to-br from-emerald-400 to-teal-500 rounded-full flex items-center justify-center shadow-2xl shadow-emerald-200 animate-bounce">
-                            <svg className="w-14 h-14 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
-                        </div>
-                        {/* Decorative rings */}
-                        <div className="absolute inset-0 -m-4 border-4 border-emerald-200/50 rounded-full animate-ping"></div>
-                    </div>
-                    <h1 className="text-3xl font-extrabold text-slate-900 mt-6 mb-2">
-                        Đặt sân thành công!
-                    </h1>
-                    <p className="text-slate-500">Cảm ơn bạn đã sử dụng dịch vụ của chúng tôi</p>
-                </div>
+        <div className="h-[calc(100vh-64px)] overflow-y-auto bg-[#E0E7FF] flex items-start md:items-center justify-center p-4 py-8 md:py-4 font-sans">
+            <div className="w-full max-w-4xl relative drop-shadow-2xl my-auto md:my-0">
 
-                {/* Booking Details Card */}
-                <div className="bg-white/90 backdrop-blur-sm rounded-3xl shadow-xl overflow-hidden mb-6">
-                    {/* Venue Header */}
-                    <div className="relative h-40">
-                        {booking.court.venue.image ? (
-                            <img
-                                src={booking.court.venue.image}
-                                alt={booking.court.venue.name}
-                                className="w-full h-full object-cover"
-                            />
-                        ) : (
-                            <div className="w-full h-full bg-gradient-to-br from-indigo-400 via-purple-400 to-pink-400 flex items-center justify-center">
-                                <span className="text-6xl opacity-50">🏟️</span>
+                {/* 
+                    Loading Overlay: 
+                    Positioned absolutely within this relative container.
+                    It will center itself over the ticket.
+                */}
+                <LoadingOverlay isLoading={isLoading} fullScreen={false} message="Đang tải vé..." />
+
+                {/* Main Ticket Container - Blurred when loading */}
+                <div className={`flex flex-col md:flex-row bg-white rounded-3xl overflow-hidden min-h-[500px] transition-all duration-300 ${isLoading ? 'blur-sm opacity-60 pointer-events-none' : ''}`}>
+
+                    {/* Left Section: Main Info (Width 65%) */}
+                    <div className="flex-1 p-6 md:p-10 flex flex-col relative">
+                        {/* Venue Header */}
+                        <div className="flex flex-row items-center md:items-start gap-4 md:gap-6 mb-6 md:mb-8">
+                            <div className="w-20 h-20 md:w-32 md:h-32 rounded-2xl overflow-hidden flex-shrink-0 shadow-md bg-slate-100">
+                                {displayData.court.venue.image ? (
+                                    <img
+                                        src={displayData.court.venue.image}
+                                        alt={displayData.court.venue.name}
+                                        className="w-full h-full object-cover"
+                                    />
+                                ) : (
+                                    <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-3xl font-bold">
+                                        {displayData.court.venue.name.charAt(0)}
+                                    </div>
+                                )}
                             </div>
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-                        <div className="absolute bottom-4 left-4 right-4">
-                            <h2 className="text-xl font-bold text-white">{booking.court.venue.name}</h2>
-                            <p className="text-white/80 text-sm">{booking.court.name}</p>
-                        </div>
-                    </div>
 
-                    {/* Booking Info */}
-                    <div className="p-6">
-                        {/* Booking Code */}
-                        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl p-4 mb-6 text-center border border-emerald-100">
-                            <p className="text-sm text-slate-500 mb-1">Mã đơn đặt sân</p>
-                            <p className="text-2xl font-bold font-mono text-emerald-700 tracking-wider">
-                                {booking.payment_code}
-                            </p>
+                            <div className="flex-1">
+                                <span className={`inline-block bg-emerald-100 text-emerald-700 text-[10px] md:text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide mb-2 ${isLoading ? 'opacity-0' : ''}`}>
+                                    Thanh toán thành công
+                                </span>
+                                <h2 className="text-xl md:text-3xl font-extrabold text-slate-800 leading-tight mb-2">
+                                    {displayData.court.venue.name}
+                                </h2>
+                                <p className="text-slate-500 text-xs md:text-sm flex items-start gap-1">
+                                    <svg className="w-4 h-4 mt-0.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                    <span className="line-clamp-2 md:line-clamp-none">{displayData.court.venue.address}</span>
+                                </p>
+                            </div>
                         </div>
 
                         {/* Details Grid */}
-                        <div className="space-y-4">
-                            <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl">
-                                <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <p className="text-xs text-slate-400 uppercase tracking-wider">Ngày</p>
-                                    <p className="font-semibold text-slate-800">
-                                        {new Date(booking.date).toLocaleDateString('vi-VN', {
-                                            weekday: 'long',
-                                            day: 'numeric',
-                                            month: 'long',
-                                            year: 'numeric'
-                                        })}
-                                    </p>
-                                </div>
+                        <div className="grid grid-cols-2 gap-y-6 gap-x-4 md:gap-x-12 mb-8">
+                            <div>
+                                <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Ngày đặt</p>
+                                <p className="text-lg md:text-xl font-bold text-slate-800">
+                                    {isLoading ? '...' : new Date(displayData.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                </p>
+                                <p className="text-xs md:text-sm text-slate-400 font-medium">
+                                    {isLoading ? '...' : new Date(displayData.date).toLocaleDateString('vi-VN', { weekday: 'long' })}
+                                </p>
                             </div>
-
-                            <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl">
-                                <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <p className="text-xs text-slate-400 uppercase tracking-wider">Thời gian</p>
-                                    <p className="font-semibold text-slate-800">{booking.start_time} - {booking.end_time}</p>
-                                </div>
+                            <div>
+                                <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Thời gian</p>
+                                <p className="text-lg md:text-xl font-bold text-slate-800">{displayData.start_time} - {displayData.end_time}</p>
+                                <p className={`text-xs md:text-sm text-emerald-600 font-medium ${isLoading ? 'opacity-0' : ''}`}>Đã xác nhận</p>
                             </div>
-
-                            <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl">
-                                <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
-                                    <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <p className="text-xs text-slate-400 uppercase tracking-wider">Địa chỉ</p>
-                                    <p className="font-semibold text-slate-800">{booking.court.venue.address}</p>
-                                </div>
+                            <div>
+                                <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Sân đấu</p>
+                                <p className="text-lg md:text-xl font-bold text-slate-800">{displayData.court.name}</p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Tổng tiền</p>
+                                <p className="text-xl md:text-2xl font-black text-indigo-600">{formatCurrency(displayData.total_price)}</p>
                             </div>
                         </div>
 
-                        {/* Total Amount */}
-                        <div className="mt-6 pt-6 border-t border-dashed border-slate-200">
-                            <div className="flex justify-between items-center">
-                                <span className="text-slate-600 font-medium">Tổng thanh toán</span>
-                                <span className="text-2xl font-extrabold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
-                                    {formatCurrency(booking.total_price)}
-                                </span>
-                            </div>
-                            <p className="text-right text-xs text-slate-400 mt-1">Đã thanh toán</p>
+                        {/* Action Buttons */}
+                        <div className="mt-auto flex flex-col md:flex-row gap-3 md:gap-4">
+                            <Link
+                                href={APP_ROUTES.bookings.myBookings}
+                                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-4 rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 flex items-center justify-center gap-2 group"
+                            >
+                                Quản lý lịch đặt
+                            </Link>
+                            <Link
+                                href={APP_ROUTES.map.index}
+                                className="w-full bg-white border-2 border-slate-200 text-slate-700 px-6 py-4 rounded-xl font-bold hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
+                            >
+                                Trang chủ
+                            </Link>
                         </div>
                     </div>
-                </div>
 
-                {/* Action Buttons */}
-                <div className="space-y-3">
-                    <Link
-                        href="/my-bookings"
-                        className="flex items-center justify-center gap-2 w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-4 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg shadow-indigo-200"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                        </svg>
-                        Xem lịch đặt sân của tôi
-                    </Link>
+                    {/* Divider Section (The "Cut") */}
+                    <div className="relative flex items-center justify-center w-full h-8 md:w-8 md:h-auto md:flex-col bg-white overflow-hidden md:overflow-visible flex-shrink-0">
+                        {/* Custom dashed line: Horizontal on mobile, Vertical on md */}
+                        <div className="w-[90%] border-t-2 md:w-0 md:h-[90%] md:border-t-0 md:border-l-2 border-dashed border-slate-300"></div>
 
-                    <Link
-                        href="/map"
-                        className="flex items-center justify-center gap-2 w-full bg-white border-2 border-slate-200 text-slate-600 font-semibold py-3 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                        </svg>
-                        Tìm sân khác trên bản đồ
-                    </Link>
+                        {/* Notches for Mobile (Left/Right) */}
+                        <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 md:w-8 md:h-8 rounded-full bg-[#E0E7FF] shadow-inner md:hidden"></div>
+                        <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-6 h-6 md:w-8 md:h-8 rounded-full bg-[#E0E7FF] shadow-inner md:hidden"></div>
 
-                    <button
-                        onClick={() => router.push(`/booking/${venueId}`)}
-                        className="w-full text-indigo-600 font-medium py-2 hover:text-indigo-700 transition-colors text-sm"
-                    >
-                        Đặt thêm khung giờ tại sân này
-                    </button>
-                </div>
+                        {/* Notches for Desktop (Top/Bottom) */}
+                        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-[#E0E7FF] shadow-inner hidden md:block"></div>
+                        <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-8 h-8 rounded-full bg-[#E0E7FF] shadow-inner hidden md:block"></div>
+                    </div>
 
-                {/* Reminder */}
-                <div className="mt-8 bg-amber-50 border border-amber-200 rounded-2xl p-4">
-                    <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                            </svg>
-                        </div>
-                        <div>
-                            <p className="text-sm font-medium text-amber-800">Lưu ý quan trọng</p>
-                            <p className="text-xs text-amber-600 mt-1">
-                                Vui lòng đến trước giờ đặt 10 phút. Mang theo mã đơn hàng hoặc CMND/CCCD để check-in tại sân.
+                    {/* Right Section: Code/Stub (Width 30%) */}
+                    <div className="w-full md:w-[32%] bg-slate-50 p-6 md:p-10 flex flex-col items-center justify-center border-l md:border-l-0 border-slate-100 relative">
+
+                        <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.25em] mb-4 md:mb-6 text-center">
+                            Mã vé điện tử
+                        </h3>
+
+                        {/* Barcode / QR Simulation */}
+                        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 w-full max-w-xs md:max-w-full mb-4 md:mb-6 relative overflow-hidden group">
+                            {/* Simple simulated barcode using CSS borders */}
+                            <div className="flex items-end justify-between h-12 md:h-16 opacity-80 mb-2 px-2">
+                                {Array.from({ length: 24 }).map((_, i) => (
+                                    <div
+                                        key={i}
+                                        className={`bg-slate-800 rounded-sm`}
+                                        style={{
+                                            width: Math.random() > 0.5 ? '4px' : '2px',
+                                            height: `${30 + Math.random() * 70}%`
+                                        }}
+                                    ></div>
+                                ))}
+                            </div>
+                            <p className="text-center font-mono font-bold text-base md:text-lg text-slate-800 tracking-widest break-all">
+                                {displayData.payment_code}
                             </p>
+                            {/* Shine effect */}
+                            {!isLoading && <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/50 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>}
                         </div>
+
+                        <div className="text-center">
+                            <p className="text-xs text-slate-400 mb-2">Quét mã tại quầy lễ tân</p>
+                            <button
+                                onClick={() => router.push(APP_ROUTES.bookings.detail(venueId))}
+                                className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300"
+                            >
+                                + Đặt thêm giờ
+                            </button>
+                        </div>
+
+                        {/* Decorative 'Hole' Punch for Ticket Feel - Desktop only right, Mobile top/bottom handled by divider */}
+                        <div className="absolute top-1/2 right-4 w-4 h-4 bg-white border border-slate-200 rounded-full shadow-inner opacity-50 hidden md:block"></div>
                     </div>
                 </div>
             </div>
+            {/* Background noise texture via CSS could be added here for more paper feel */}
         </div>
     );
 }

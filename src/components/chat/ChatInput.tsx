@@ -2,6 +2,8 @@
 
 import { useState, FormEvent, KeyboardEvent, useRef, useEffect } from "react";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
+import axios from "axios";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
 
 interface ChatInputProps {
     onSendMessage: (text: string) => void;
@@ -109,14 +111,15 @@ export default function ChatInput({ onSendMessage, onSendMedia, onTyping, disabl
             const formData = new FormData();
             formData.append("file", file);
 
-            const res = await fetch("/api/drive", {
-                method: "POST",
-                body: formData,
+            const res = await axios.post(API_ENDPOINTS.chats.drive, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
             });
 
-            if (!res.ok) throw new Error("Upload failed");
+            if (res.status !== 200) throw new Error("Upload failed");
 
-            const data = await res.json();
+            const data = res.data;
             console.log("Upload API Response Data:", data);
 
             onSendMedia({

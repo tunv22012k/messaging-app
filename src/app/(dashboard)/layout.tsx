@@ -6,7 +6,7 @@ import BottomNav from "@/components/layout/BottomNav";
 import { useAuth } from "@/context/AuthContext";
 import { usePresence } from "@/hooks/usePresence";
 import { useRouter, useParams, usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useRef, useEffect } from "react";
 
 export default function DashboardLayout({
     children,
@@ -20,6 +20,15 @@ export default function DashboardLayout({
 
     // Initialize presence
     usePresence();
+
+    // Reset scroll on route change
+    const mainRef = useRef<HTMLElement>(null);
+
+    useEffect(() => {
+        if (mainRef.current) {
+            mainRef.current.scrollTop = 0;
+        }
+    }, [pathname]);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -80,7 +89,9 @@ export default function DashboardLayout({
                 </div>
 
                 {/* Main Content: Always visible except on mobile chat list view (where sidebar takes over) */}
-                <main className={`
+                <main
+                    ref={mainRef}
+                    className={`
                     flex-col flex-1 min-w-0
                     ${shouldHaveFixedLayout ? 'overflow-hidden' : 'overflow-y-auto'}
                     ${pathname === '/chat' ? 'hidden md:flex' : 'flex'}
