@@ -165,7 +165,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                                             </div>
                                             <div className="text-center md:text-left">
                                                 <h3 className="font-bold text-slate-900 leading-tight">{booking.venueName}</h3>
-                                                <p className="text-xs text-slate-500 mt-1">{booking.venueAddress}</p>
+                                                <div className="flex items-start justify-center md:justify-start gap-1 mt-1 text-slate-500">
+                                                    <svg className="w-3.5 h-3.5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    </svg>
+                                                    <p className="text-xs">{booking.venueAddress}</p>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -195,26 +201,45 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                                                 </div>
 
                                                 <div className="pt-6 border-t border-dashed border-slate-200 space-y-3">
-                                                    {/* Price Breakdown */}
-                                                    <div className="flex justify-between items-center text-sm">
-                                                        <span className="text-slate-500">Giá sân</span>
-                                                        <span className="font-semibold text-slate-900">
-                                                            {formatCurrency(booking.price - (booking.extras?.reduce((sum, item) => sum + item.price, 0) || 0))}
-                                                        </span>
-                                                    </div>
-
-                                                    {booking.extras?.map((extra, index) => (
-                                                        <div key={index} className="flex justify-between items-center text-sm">
-                                                            <span className="text-slate-500">{extra.name} {extra.quantity && extra.quantity > 1 ? `x${extra.quantity}` : ''}</span>
-                                                            <span className="font-semibold text-slate-900">{formatCurrency(extra.price)}</span>
+                                                    {/* Payment Detail Summary */}
+                                                    <div className="space-y-3">
+                                                        <div className="grid grid-cols-[1fr_40px_100px] gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">
+                                                            <div>Dịch vụ</div>
+                                                            <div className="text-center">SL</div>
+                                                            <div className="text-right">Tiền</div>
                                                         </div>
-                                                    ))}
 
-                                                    <div className="flex justify-between items-end pt-3 border-t border-slate-100 mt-3">
-                                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Tổng thanh toán</p>
-                                                        <p className="text-3xl font-black text-blue-600 tracking-tight">
-                                                            {formatCurrency(booking.price)}
-                                                        </p>
+                                                        <div className="space-y-3 mb-4">
+                                                            {/* Slot */}
+                                                            {/* Slot */}
+                                                            <div className="grid grid-cols-[1fr_40px_100px] gap-2 text-sm items-center px-1">
+                                                                <div className="text-slate-500">Giá sân</div>
+                                                                <div className="text-center text-slate-400 text-xs font-medium bg-slate-50 rounded py-1">x1</div>
+                                                                <div className="text-right font-semibold text-slate-900">
+                                                                    {formatCurrency(booking.price - (booking.extras?.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0) || 0))}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Extras */}
+                                                            {booking.extras?.map((extra, index) => (
+                                                                <div key={index} className="grid grid-cols-[1fr_40px_100px] gap-2 text-sm items-center px-1">
+                                                                    <div className="text-slate-500">{extra.name}</div>
+                                                                    <div className="text-center text-slate-400 text-xs font-medium bg-slate-50 rounded py-1">
+                                                                        x{extra.quantity || 1}
+                                                                    </div>
+                                                                    <div className="text-right font-semibold text-slate-900">
+                                                                        {formatCurrency(extra.price * (extra.quantity || 1))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+
+                                                        <div className="flex justify-between items-end pt-4 border-t border-slate-100 mt-4 px-1">
+                                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Tổng thanh toán</p>
+                                                            <p className="text-3xl font-black text-blue-600 tracking-tight">
+                                                                {formatCurrency(booking.price)}
+                                                            </p>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>

@@ -53,7 +53,8 @@ export default function MapPage() {
                         lng: Number(v.lng)
                     },
                     address: v.address,
-                    price: v.price_info,
+                    price: v.price || 0,
+                    pricing_type: v.pricing_type || 'hour',
                     description: v.description,
                     image: v.image,
                     courts: v.courts.map((c: any) => ({
@@ -243,7 +244,10 @@ export default function MapPage() {
                                 <span className="capitalize font-medium text-blue-600 border border-blue-200 bg-blue-50 px-1.5 py-0.5 rounded text-xs mr-2">
                                     {selectedVenue.type}
                                 </span>
-                                <span>{selectedVenue.price}</span>
+                                <span>
+                                    {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedVenue.price)}
+                                    / {selectedVenue.pricing_type === 'hour' ? 'giờ' : selectedVenue.pricing_type}
+                                </span>
                             </div>
                             <p className="text-xs text-gray-500 mb-3">{selectedVenue.address}</p>
 

@@ -37,7 +37,8 @@ interface Venue {
     type: string;
     address: string;
     description: string;
-    price_info: string;
+    price: number;
+    pricing_type: string;
     image: string;
     courts: Court[];
     extras: VenueExtra[];
@@ -132,7 +133,7 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
             // Parse price info (rough heuristic or fixed)
             // Use fake fixed price for all slots if price_info is text
             // "80,000 VND/h" -> 80000
-            const price = parseInt(venue.price_info.replace(/\D/g, '')) || 100000;
+            const price = venue.price || 100000;
 
             slots.push({
                 id: `${selectedCourtId}_${startTime}`,

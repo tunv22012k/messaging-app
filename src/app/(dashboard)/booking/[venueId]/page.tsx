@@ -63,7 +63,8 @@ interface Venue {
     type: string;
     address: string;
     description: string;
-    price_info: string;
+    price: number;
+    pricing_type: string;
     image: string;
     courts: Court[];
     extras: VenueExtra[];
@@ -83,7 +84,7 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
 
     // Form State
     const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
-    const [selectedExtraIds, setSelectedExtraIds] = useState<string[]>([]);
+    const [selectedExtras, setSelectedExtras] = useState<Record<string, number>>({});
     const [isBooked, setIsBooked] = useState(false);
 
     // Default court selection for tabs
@@ -208,7 +209,7 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
             const isOwnPending = pendingSlot ? pendingSlot.user_id === currentUserId : false;
             const pendingBookingId = pendingSlot?.id || null;
 
-            const price = parseInt(venue.price_info.replace(/\D/g, '')) || 100000;
+            const price = venue.price || 100000;
 
             slots.push({
                 id: `${selectedCourtId}_${startTime}`,
@@ -235,12 +236,19 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
         );
     };
 
-    const handleExtraToggle = (extraId: string) => {
-        setSelectedExtraIds(prev =>
-            prev.includes(extraId)
-                ? prev.filter(id => id !== extraId)
-                : [...prev, extraId]
-        );
+    const handleExtraUpdate = (extraId: string, delta: number) => {
+        setSelectedExtras(prev => {
+            const currentQty = prev[extraId] || 0;
+            const newQty = Math.max(0, currentQty + delta);
+
+            const next = { ...prev };
+            if (newQty === 0) {
+                delete next[extraId];
+            } else {
+                next[extraId] = newQty;
+            }
+            return next;
+        });
     };
 
     const formatCurrency = (amount: number) => {
@@ -253,11 +261,13 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
             .reduce((sum, s) => sum + s.price, 0);
 
         const extrasTotal = (venue?.extras || [])
-            .filter(e => selectedExtraIds.includes(String(e.id)))
-            .reduce((sum, e) => sum + Number(e.price), 0);
+            .reduce((sum, e) => {
+                const qty = selectedExtras[String(e.id)] || 0;
+                return sum + (Number(e.price) * qty);
+            }, 0);
 
         return slotsTotal + extrasTotal;
-    }, [availableSlots, selectedSlotIds, selectedExtraIds, venue]);
+    }, [availableSlots, selectedSlotIds, selectedExtras, venue]);
 
     const handleBook = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -286,13 +296,23 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                 return;
             }
 
+            // Prepare extras
+            const extrasPayload = (venue?.extras || [])
+                .filter(e => (selectedExtras[String(e.id)] || 0) > 0)
+                .map(e => ({
+                    name: e.name,
+                    price: Number(e.price),
+                    quantity: selectedExtras[String(e.id)]
+                }));
+
             // Call initiate API to create pending booking
             const res = await api.post(API_ENDPOINTS.bookings.initiate, {
                 court_id: slot.courtId,
                 date: bookingDate,
                 start_time: slot.startTime,
                 end_time: slot.endTime,
-                total_price: totalPrice // includes extras
+                total_price: totalPrice,
+                extras: extrasPayload
             });
 
             const data = res.data;
@@ -507,8 +527,8 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                         availableSlots={availableSlots}
                                         selectedSlotIds={selectedSlotIds}
                                         handleSlotToggle={handleSlotToggle}
-                                        selectedExtraIds={selectedExtraIds}
-                                        handleExtraToggle={handleExtraToggle}
+                                        selectedExtras={selectedExtras}
+                                        handleExtraUpdate={handleExtraUpdate}
                                         totalPrice={totalPrice}
                                         formatCurrency={formatCurrency}
                                         isSlotPast={isSlotPast}
@@ -516,7 +536,7 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                         isBooked={isBooked}
                                         setIsBooked={setIsBooked}
                                         setSelectedSlotIds={setSelectedSlotIds}
-                                        setSelectedExtraIds={setSelectedExtraIds}
+                                        setSelectedExtras={setSelectedExtras}
                                     />
                                 )}
                             </div>
@@ -656,8 +676,8 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                         availableSlots={availableSlots}
                                         selectedSlotIds={selectedSlotIds}
                                         handleSlotToggle={handleSlotToggle}
-                                        selectedExtraIds={selectedExtraIds}
-                                        handleExtraToggle={handleExtraToggle}
+                                        selectedExtras={selectedExtras}
+                                        handleExtraUpdate={handleExtraUpdate}
                                         totalPrice={totalPrice}
                                         formatCurrency={formatCurrency}
                                         isSlotPast={isSlotPast}
@@ -665,7 +685,7 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                         isBooked={isBooked}
                                         setIsBooked={setIsBooked}
                                         setSelectedSlotIds={setSelectedSlotIds}
-                                        setSelectedExtraIds={setSelectedExtraIds}
+                                        setSelectedExtras={setSelectedExtras}
                                     />
                                 )}
                             </div>
@@ -687,8 +707,8 @@ interface BookingCardProps {
     availableSlots: Slot[];
     selectedSlotIds: string[];
     handleSlotToggle: (slotId: string) => void;
-    selectedExtraIds: string[];
-    handleExtraToggle: (extraId: string) => void;
+    selectedExtras: Record<string, number>;
+    handleExtraUpdate: (extraId: string, delta: number) => void;
     totalPrice: number;
     formatCurrency: (amount: number) => string;
     isSlotPast: (date: string, startTime: string) => boolean;
@@ -696,7 +716,7 @@ interface BookingCardProps {
     isBooked: boolean;
     setIsBooked: (value: boolean) => void;
     setSelectedSlotIds: (ids: string[]) => void;
-    setSelectedExtraIds: (ids: string[]) => void;
+    setSelectedExtras: (extras: Record<string, number>) => void;
 }
 
 function BookingCard({
@@ -708,8 +728,8 @@ function BookingCard({
     availableSlots,
     selectedSlotIds,
     handleSlotToggle,
-    selectedExtraIds,
-    handleExtraToggle,
+    selectedExtras,
+    handleExtraUpdate,
     totalPrice,
     formatCurrency,
     isSlotPast,
@@ -717,7 +737,7 @@ function BookingCard({
     isBooked,
     setIsBooked,
     setSelectedSlotIds,
-    setSelectedExtraIds
+    setSelectedExtras
 }: BookingCardProps) {
     if (isBooked) {
         return (
@@ -745,7 +765,7 @@ function BookingCard({
                         onClick={() => {
                             setIsBooked(false);
                             setSelectedSlotIds([]);
-                            setSelectedExtraIds([]);
+                            setSelectedExtras({});
                         }}
                         className="w-full text-sm text-emerald-600 font-semibold hover:text-emerald-700 py-2 transition-colors"
                     >
@@ -899,38 +919,50 @@ function BookingCard({
                             Dịch vụ thêm
                         </label>
                         <div className="space-y-2">
-                            {venue.extras.map(extra => (
-                                <label
-                                    key={extra.id}
-                                    className={`flex items-center justify-between p-4 border-2 rounded-xl cursor-pointer transition-all ${selectedExtraIds.includes(String(extra.id))
-                                        ? 'border-indigo-400 bg-indigo-50/50'
-                                        : 'border-slate-100 hover:border-slate-200 hover:bg-slate-50'
-                                        }`}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${selectedExtraIds.includes(String(extra.id))
-                                            ? 'bg-indigo-600 border-indigo-600'
-                                            : 'border-slate-300'
-                                            }`}>
-                                            {selectedExtraIds.includes(String(extra.id)) && (
-                                                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                                </svg>
-                                            )}
+                            {venue.extras.map(extra => {
+                                const quantity = selectedExtras[String(extra.id)] || 0;
+                                return (
+                                    <div
+                                        key={extra.id}
+                                        className={`flex items-center justify-between p-3 border-2 rounded-xl transition-all ${quantity > 0
+                                            ? 'border-indigo-400 bg-indigo-50/50'
+                                            : 'border-slate-100 hover:border-slate-200'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-sm font-medium text-slate-700">{extra.name}</span>
+                                            <span className="text-xs font-bold text-indigo-600 bg-indigo-100 px-2 py-1 rounded">
+                                                {formatCurrency(Number(extra.price))}
+                                            </span>
                                         </div>
-                                        <input
-                                            type="checkbox"
-                                            className="sr-only"
-                                            checked={selectedExtraIds.includes(String(extra.id))}
-                                            onChange={() => handleExtraToggle(String(extra.id))}
-                                        />
-                                        <span className="text-sm font-medium text-slate-700">{extra.name}</span>
+
+                                        <div className="flex items-center gap-3 bg-white rounded-lg shadow-sm border border-slate-200 p-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleExtraUpdate(String(extra.id), -1)}
+                                                disabled={quantity === 0}
+                                                className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-600 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                                                </svg>
+                                            </button>
+                                            <span className="w-6 text-center font-bold text-sm text-slate-700">
+                                                {quantity}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleExtraUpdate(String(extra.id), 1)}
+                                                className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-indigo-50 text-indigo-600 transition-colors"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
-                                    <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg">
-                                        {formatCurrency(Number(extra.price))}
-                                    </span>
-                                </label>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}

@@ -7,7 +7,8 @@ export interface Venue {
         lng: number;
     };
     address: string;
-    price: string;
+    price: number;
+    pricing_type: string;
     image?: string;
     description: string;
     courts: {
@@ -44,7 +45,8 @@ export const VENUES: Venue[] = [
         type: 'badminton',
         location: { lat: 16.0372, lng: 108.2120 },
         address: '7 Duy Tân, Hòa Cường Bắc, Hải Châu, Đà Nẵng',
-        price: '80,000 VND/h',
+        price: 80000,
+        pricing_type: 'hour',
         description: 'Sân tiêu chuẩn thi đấu, thoáng mát, trung tâm thành phố.',
         courts: [
             {
@@ -91,7 +93,8 @@ export const VENUES: Venue[] = [
         type: 'football',
         location: { lat: 16.0336, lng: 108.2238 },
         address: 'Làng thể thao Tuyên Sơn, Hải Châu, Đà Nẵng',
-        price: '300,000 VND/trận',
+        price: 300000,
+        pricing_type: 'match',
         description: 'Cụm sân cỏ nhân tạo lớn nhất Đà Nẵng, dịch vụ tốt.',
         courts: [
             {
@@ -119,7 +122,8 @@ export const VENUES: Venue[] = [
         type: 'tennis',
         location: { lat: 16.0610, lng: 108.2045 },
         address: 'Công viên 29/3, Thanh Khê, Đà Nẵng',
-        price: '150,000 VND/h',
+        price: 150000,
+        pricing_type: 'hour',
         description: 'Không gian xanh mát, yên tĩnh, mặt sân cứng.',
         courts: [
             {
@@ -142,7 +146,8 @@ export const VENUES: Venue[] = [
         type: 'badminton',
         location: { lat: 16.0718, lng: 108.2215 },
         address: 'SVĐ Chi Lăng, Hải Châu, Đà Nẵng',
-        price: '70,000 VND/h',
+        price: 70000,
+        pricing_type: 'hour',
         description: 'Sân lâu đời, giá bình dân, cộng đồng chơi đông.',
         courts: [],
         extras: [],
@@ -154,7 +159,8 @@ export const VENUES: Venue[] = [
         type: 'football',
         location: { lat: 16.0594, lng: 108.2435 },
         address: 'An Đồn, Sơn Trà, Đà Nẵng',
-        price: '350,000 VND/trận',
+        price: 350000,
+        pricing_type: 'match',
         description: 'Sân mới, cỏ đẹp, gần biển.',
         courts: [],
         extras: [],
