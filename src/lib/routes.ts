@@ -9,6 +9,7 @@ export const APP_ROUTES = {
     },
     bookings: {
         myBookings: '/my-bookings',
+        viewDetail: (bookingId: string | number) => `/my-bookings/${bookingId}`,
         detail: (venueId: string | number) => `/booking/${venueId}`,
         payment: (venueId: string | number, bookingId: string | number) => `/booking/${venueId}/payment?bookingId=${bookingId}`,
         success: (venueId: string | number, bookingId: string | number) => `/booking/${venueId}/success?bookingId=${bookingId}`,

@@ -13,6 +13,7 @@ export const API_ENDPOINTS = {
         initiate: '/bookings/initiate',
         confirm: (id: string | number) => `/bookings/${id}/confirm`,
         cancel: (id: string | number) => `/bookings/${id}/cancel`,
+        transfer: (id: string | number) => `/bookings/${id}/transfer`,
     },
     venues: {
         list: '/venues',
