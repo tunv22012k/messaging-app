@@ -593,8 +593,18 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
                                 <div className="space-y-5">
                                     {venue?.reviews.map(review => (
                                         <div key={review.id} className="flex gap-4 pb-5 border-b border-slate-100 last:border-0 last:pb-0">
-                                            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-purple-200 flex-shrink-0">
-                                                {review.user?.name?.charAt(0).toUpperCase() || 'U'}
+                                            <div className="w-11 h-11 rounded-2xl bg-gray-100 flex items-center justify-center overflow-hidden flex-shrink-0 border border-gray-200">
+                                                {review.user?.avatar ? (
+                                                    <img
+                                                        src={review.user.avatar}
+                                                        alt={review.user.name}
+                                                        className="w-full h-full object-cover"
+                                                    />
+                                                ) : (
+                                                    <div className="w-full h-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-sm">
+                                                        {review.user?.name?.charAt(0).toUpperCase() || 'U'}
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2">
