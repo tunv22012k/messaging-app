@@ -418,7 +418,10 @@ export default function VenueDetailPage({ params }: { params: Promise<{ venueId:
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 relative">
+        <div className="min-h-screen relative">
+            {/* Fixed Background Layer */}
+            <div className="fixed inset-0 bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 -z-10" />
+
             {/* Loading Overlay - appears on top of content */}
             <LoadingOverlay isLoading={isLoading} message="Đang tải thông tin sân..." fullScreen={false} />
 

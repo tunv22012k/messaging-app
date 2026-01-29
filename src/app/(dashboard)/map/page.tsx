@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from "@react-google-maps/api";
-import { Venue } from "@/data/venues";
+import { Venue } from "@/types/venue";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { APP_ROUTES } from "@/lib/routes";
@@ -113,8 +113,10 @@ export default function MapPage() {
         setSearchQuery(venue.name);
         setIsSearchOpen(false);
         setSelectedVenue(venue);
-        map?.panTo(venue.location);
-        map?.setZoom(15);
+        if (venue.location) {
+            map?.panTo(venue.location);
+            map?.setZoom(15);
+        }
     };
 
     const onLoad = useCallback(function callback(map: google.maps.Map) {
@@ -223,17 +225,19 @@ export default function MapPage() {
                 options={OPTIONS}
             >
                 {venues.map((venue) => (
-                    <Marker
-                        key={venue.id}
-                        position={venue.location}
-                        onClick={() => setSelectedVenue(venue)}
-                        icon={{
-                            url: getIcon(venue.type)!,
-                        }}
-                    />
+                    venue.location && (
+                        <Marker
+                            key={venue.id}
+                            position={venue.location}
+                            onClick={() => setSelectedVenue(venue)}
+                            icon={{
+                                url: getIcon(venue.type)!,
+                            }}
+                        />
+                    )
                 ))}
 
-                {selectedVenue && (
+                {selectedVenue && selectedVenue.location && (
                     <InfoWindow
                         position={selectedVenue.location}
                         onCloseClick={() => setSelectedVenue(null)}
@@ -261,6 +265,6 @@ export default function MapPage() {
                     </InfoWindow>
                 )}
             </GoogleMap>
-        </div>
+        </div >
     );
 }
